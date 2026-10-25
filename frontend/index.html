@@ -1,0 +1,637 @@
+<!DOCTYPE html>
+<html lang="ru">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Klukva — Трекер задач</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+
+<body>
+  <div class="app-layout">
+    <!-- Top Navigation Header -->
+    <header class="app-header">
+      <div class="header-left">
+        <div class="brand">
+          <span class="brand-dot"></span>
+          <span class="brand-name">KLUKVA</span>
+        </div>
+        <nav class="nav-tabs" id="navTabs">
+          <button class="tab-btn active" id="tabBacklog" data-tab="backlog">Бэклог</button>
+          <button class="tab-btn" id="tabSprints" data-tab="sprints">Спринты</button>
+          <button class="tab-btn" id="tabBoard" data-tab="board">Scam-доска</button>
+        </nav>
+      </div>
+
+      <div class="header-right">
+        <button class="btn btn-primary" id="btnOpenCreateTask">
+          <span class="btn-text-full">+ Создать задачу</span>
+          <span class="btn-text-short">+ Задача</span>
+        </button>
+        <div class="user-profile" id="userProfile" style="display: none;">
+          <span class="user-avatar" id="userAvatar">U</span>
+          <span class="user-label" id="userDisplayName"></span>
+          <button class="btn btn-ghost btn-sm" id="btnLogout" title="Выйти из системы">Выйти</button>
+        </div>
+      </div>
+    </header>
+
+    <!-- Main Content Container -->
+    <main class="app-main">
+
+      <!-- ================================================================
+           1. BACKLOG VIEW (ТОЛЬКО ЗАДАЧИ БЭКЛОГА)
+           ================================================================ -->
+      <section class="view-section active" id="viewBacklog">
+        <div class="toolbar" id="backlogToolbar">
+          <div class="toolbar-mobile-toggle" id="toolbarMobileToggle">
+            <button type="button" class="btn btn-secondary btn-sm btn-filter-toggle" id="btnToggleFilters">
+              <span class="filter-toggle-icon">&#9776;</span>
+              <span id="btnToggleFiltersText">Фильтры и поиск</span>
+              <span class="filter-active-dot" id="filterActiveDot" style="display: none;">●</span>
+            </button>
+            <div class="view-stats mobile-stats" id="backlogStatsMobile">
+              <span id="backlogCountMobile">0 задач</span>
+              <span class="stat-separator">•</span>
+              <span id="backlogSpTotalMobile">0 SP</span>
+            </div>
+          </div>
+          <div class="filters-group" id="backlogFiltersGroup">
+            <div class="filter-item">
+              <label for="filterStatus">Статус</label>
+              <select id="filterStatus" class="form-control select-sm">
+                <option value="" selected>Все статусы</option>
+                <option value="Бэклог">Бэклог</option>
+                <option value="В работе">В работе</option>
+                <option value="Завершено">Завершено</option>
+                <option value="Не реализовано">Не реализовано</option>
+                <option value="Реализовано частично">Реализовано частично</option>
+              </select>
+            </div>
+
+            <div class="filter-item">
+              <label for="filterSp">Story Points</label>
+              <input type="number" id="filterSp" class="form-control input-sm" placeholder="Любые SP" min="0"
+                step="0.5">
+            </div>
+
+            <div class="filter-item">
+              <label for="filterAssignee">Исполнитель</label>
+              <select id="filterAssignee" class="form-control select-sm">
+                <option value="">Все исполнители</option>
+                <option value="unassigned">Не назначен</option>
+              </select>
+            </div>
+
+            <div class="filter-item flex-grow">
+              <label for="filterSearch">Поиск</label>
+              <input type="text" id="filterSearch" class="form-control input-sm"
+                placeholder="Поиск по ключу, названию...">
+            </div>
+
+            <div class="filter-item filter-actions">
+              <button class="btn btn-secondary btn-sm" id="btnResetFilters">Сбросить</button>
+            </div>
+          </div>
+
+          <div class="view-stats" id="backlogStats">
+            <span id="backlogCount">0 задач</span>
+            <span class="stat-separator">•</span>
+            <span id="backlogSpTotal">0 SP</span>
+          </div>
+        </div>
+
+        <div class="table-container p-16">
+          <div class="panel-box">
+            <div class="panel-box-header">
+              <div class="header-left-info">
+                <span class="panel-title">Задачи бэклога</span>
+                <span class="panel-metrics" id="backlogMetrics">0 задач • 0 SP</span>
+              </div>
+              <div class="header-right-info">
+                <span class="hint-text">Задачи, еще не взятые в работу спринта</span>
+              </div>
+            </div>
+
+            <div class="table-scroll-wrapper">
+              <table class="tasks-table">
+                <thead>
+                  <tr>
+                    <th style="width: 100px;">Ключ</th>
+                    <th>Название задачи</th>
+                    <th style="width: 80px; text-align: center;">SP</th>
+                    <th style="width: 180px;">Исполнитель</th>
+                    <th style="width: 150px;">Статус</th>
+                    <th style="width: 140px; text-align: right;">Действия</th>
+                  </tr>
+                </thead>
+                <tbody id="pureBacklogTableBody"></tbody>
+              </table>
+            </div>
+            <div id="pureBacklogEmptyState" class="empty-state-dropzone" style="display: none;">
+              Бэклог пуст. Создайте новую задачу кнопкой "+ Создать задачу".
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================================================================
+           2. SPRINTS VIEW (СПРИНТ + ПЕРЕТАСКИВАНИЕ ИЗ БЭКЛОГА)
+           ================================================================ -->
+      <section class="view-section" id="viewSprints">
+        <div class="toolbar">
+          <div class="sprint-view-controls">
+            <span class="panel-title" id="sprintsActiveSprintLabel">Спринты и планирование</span>
+          </div>
+          <div class="header-actions">
+            <button type="button" class="btn btn-primary btn-sm" id="btnCreateSprintInTab">+ Создать спринт</button>
+            <button type="button" class="btn btn-secondary btn-sm" id="btnCloseSprintInTab"
+              style="display: none;">Завершить спринт</button>
+          </div>
+        </div>
+
+        <div class="table-container sprint-layout-container">
+          <!-- CURRENT ACTIVE SPRINT BOX (DROPZONE) -->
+          <div class="sprint-section-box" id="sectionSprint" data-drop-zone="sprint">
+            <div class="sprint-section-header">
+              <div class="sprint-header-left">
+                <span class="sprint-badge" id="sprintBadgeTitle">
+                  <span id="sprintNameDisplay">Активный спринт</span>
+                </span>
+                <span class="sprint-goal-display" id="sprintGoalDisplay" style="display: none;"></span>
+                <span class="sprint-metrics" id="sprintStats">0 задач • 0 SP</span>
+              </div>
+              <div class="sprint-header-right">
+                <span class="drag-hint">Перетаскивайте задачи сюда для включения в спринт</span>
+              </div>
+            </div>
+
+            <div class="table-scroll-wrapper">
+              <table class="tasks-table">
+                <thead>
+                  <tr>
+                    <th style="width: 32px; text-align: center;"></th>
+                    <th style="width: 100px;">Ключ</th>
+                    <th>Название задачи</th>
+                    <th style="width: 80px; text-align: center;">SP</th>
+                    <th style="width: 180px;">Исполнитель</th>
+                    <th style="width: 150px;">Статус</th>
+                    <th style="width: 140px; text-align: right;">Действия</th>
+                  </tr>
+                </thead>
+                <tbody id="sprintTableBody"></tbody>
+              </table>
+            </div>
+            <div id="sprintEmptyState" class="empty-state-dropzone">
+              В активном спринте пока нет задач. Перетащите задачи из списка ниже или нажмите кнопку "+ Спринт".
+            </div>
+          </div>
+
+          <!-- BACKLOG TASKS TO DRAG INTO SPRINT (DROPZONE) -->
+          <div class="sprint-section-box" id="sectionBacklog" data-drop-zone="backlog">
+            <div class="sprint-section-header">
+              <div class="sprint-header-left">
+                <span class="sprint-badge secondary">Бэклог (доступно для переноса в спринт)</span>
+                <span class="sprint-metrics" id="backlogSubStats">0 задач • 0 SP</span>
+              </div>
+              <div class="sprint-header-right">
+                <span class="drag-hint">Перетащите задачу вверх для добавления в спринт</span>
+              </div>
+            </div>
+
+            <div class="table-scroll-wrapper">
+              <table class="tasks-table">
+                <thead>
+                  <tr>
+                    <th style="width: 32px; text-align: center;"></th>
+                    <th style="width: 100px;">Ключ</th>
+                    <th>Название задачи</th>
+                    <th style="width: 80px; text-align: center;">SP</th>
+                    <th style="width: 180px;">Исполнитель</th>
+                    <th style="width: 150px;">Статус</th>
+                    <th style="width: 140px; text-align: right;">Действия</th>
+                  </tr>
+                </thead>
+                <tbody id="backlogTableBody"></tbody>
+              </table>
+            </div>
+            <div id="backlogEmptyState" class="empty-state-dropzone">
+              Все задачи распределены по спринтам.
+            </div>
+          </div>
+
+          <!-- PAST SPRINTS -->
+          <div class="past-sprints-container">
+            <div class="section-subheading">
+              <h3 class="past-sprints-title">Завершенные спринты</h3>
+            </div>
+            <div id="pastSprintsList" class="past-sprints-list"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================================================================
+           3. SCRUM BOARD VIEW (КАК НА СКРИНШОТЕ С ДОРОЖКАМИ И КОЛОНКАМИ)
+           ================================================================ -->
+      <section class="view-section" id="viewBoard">
+        <div class="board-top-subbar">
+          <div class="board-title-group">
+            <span class="board-name">Scrum Board</span>
+            <span class="breadcrumb-separator">—</span>
+            <span class="board-sprint-name" id="boardSprintNameDisplay">V-Спринт (Активный)</span>
+          </div>
+          <div class="board-quick-actions">
+            <button class="board-quick-link" id="boardFilterOnlyMy">Только мои задачи</button>
+            <button class="board-quick-link" id="boardFilterAll">Все задачи</button>
+            <span class="board-counter" id="boardTaskCount">0 задач</span>
+          </div>
+        </div>
+
+        <div class="scrum-board-wrapper">
+          <div class="scrum-board-canvas">
+            <!-- 2-Tier Grouped Headers like Jira Screenshot -->
+            <div class="scrum-grid-header">
+              <div class="scrum-header-cell col-todo">
+                <div class="header-main-title">НУЖНО СДЕЛАТЬ</div>
+                <div class="header-sub-title">БЭКЛОГ / НОВАЯ</div>
+              </div>
+              <div class="scrum-header-cell col-paused">
+                <div class="header-main-title">РАБОТЫ ПРИОСТАНОВЛЕНЫ</div>
+                <div class="header-sub-title">НЕ РЕАЛИЗОВАНО / ПАУЗА</div>
+              </div>
+              <div class="scrum-header-cell col-inprog">
+                <div class="header-main-title">ВЕДЕТСЯ РАБОТА</div>
+                <div class="header-sub-title">В РАБОТЕ / АНАЛИЗ</div>
+              </div>
+              <div class="scrum-header-cell col-done">
+                <div class="header-main-title">РАБОТЫ ЗАВЕРШЕНЫ</div>
+                <div class="header-sub-title">ЗАВЕРШЕНО / ГОТОВО</div>
+              </div>
+            </div>
+
+            <!-- Swimlanes Container -->
+            <div class="scrum-swimlanes-list" id="scrumSwimlanesList">
+              <!-- Dynamically populated swimlanes per assignee -->
+            </div>
+          </div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <!-- =========================================================================
+       FULL-PAGE VIEW: TASK DETAILS (JIRA STYLE)
+       ========================================================================= -->
+  <div class="fullpage-view" id="fullpageTaskDetail" style="display: none;">
+    <div class="fullpage-header">
+      <div class="fullpage-header-left">
+        <button class="btn btn-ghost btn-back" id="btnBackFromDetail">
+          <span class="back-arrow">&larr;</span> Назад к списку
+        </button>
+        <span class="breadcrumb-separator">/</span>
+        <span class="task-key-badge" id="detailTaskKey">KLUK-0</span>
+        <span id="detailStatusBadgeSlot"></span>
+      </div>
+      <div class="fullpage-header-right">
+        <button class="btn btn-secondary btn-sm" id="btnDetailTakeTask">Взять в работу</button>
+        <button class="btn btn-primary btn-sm" id="btnSaveTask">Сохранить</button>
+        <span id="saveStatusIndicator" class="status-msg"></span>
+      </div>
+    </div>
+
+    <div class="fullpage-body jira-layout">
+      <!-- Left Main Column (68%) -->
+      <div class="jira-main-column">
+        <!-- Title Section with hover edit button -->
+        <div class="editable-block" id="blockTitle">
+          <div class="editable-block-view" id="viewTitleBlock">
+            <h1 class="task-title-display" id="displayTitle"></h1>
+            <button type="button" class="btn-hover-edit" id="btnStartEditTitle">
+              Редактировать
+            </button>
+          </div>
+          <div class="editable-block-edit" id="editTitleBlock" style="display: none;">
+            <input type="text" id="inputEditTitle" class="form-control form-control-lg jira-title-input" required>
+            <div class="inline-edit-actions">
+              <button type="button" class="btn btn-primary btn-sm" id="btnSaveInlineTitle">Сохранить</button>
+              <button type="button" class="btn btn-secondary btn-sm" id="btnCancelInlineTitle">Отмена</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Partial Implementation Split Banner -->
+        <div class="partial-split-box" id="partialSplitBox" style="display: none;">
+          <div class="split-info">
+            <div class="split-title">Задача реализована частично</div>
+            <div class="split-desc">Вы можете перенести нереализованный остаток отдельным пунктом в бэклог со ссылкой на
+              эту задачу.</div>
+          </div>
+          <button class="btn btn-accent btn-sm" id="btnOpenSplitModal">Занести нереализованную часть в бэклог</button>
+        </div>
+
+        <!-- Description Section with hover edit button -->
+        <div class="jira-section">
+          <div class="editable-block" id="blockDesc">
+            <div class="jira-section-header">
+              <label class="jira-section-label">Описание</label>
+              <button type="button" class="btn-hover-edit" id="btnStartEditDesc">
+                Редактировать
+              </button>
+            </div>
+            <div class="editable-block-view" id="viewDescBlock">
+              <div class="task-desc-display" id="displayDesc"></div>
+            </div>
+            <div class="editable-block-edit" id="editDescBlock" style="display: none;">
+              <textarea id="inputEditDesc" class="form-control jira-desc-textarea" rows="7"
+                placeholder="Добавьте описание или критерии приемки..."></textarea>
+              <div class="inline-edit-actions">
+                <button type="button" class="btn btn-primary btn-sm" id="btnSaveInlineDesc">Сохранить</button>
+                <button type="button" class="btn btn-secondary btn-sm" id="btnCancelInlineDesc">Отмена</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Comments Section -->
+        <div class="jira-section comments-section">
+          <label class="jira-section-label">Комментарии и обсуждение</label>
+
+          <div class="comment-input-box">
+            <div class="mention-autocomplete" id="mentionAutocomplete" style="display: none;"></div>
+            <textarea id="inputCommentText" class="form-control" rows="3"
+              placeholder="Написать комментарий... Используйте @username для упоминания"></textarea>
+            <div class="comment-submit-bar">
+              <span class="keyboard-hint">Совет: введите @ для упоминания коллеги</span>
+              <button class="btn btn-primary btn-sm" id="btnSubmitComment">Отправить комментарий</button>
+            </div>
+          </div>
+
+          <div class="comments-list" id="commentsList"></div>
+        </div>
+      </div>
+
+      <!-- Right Metadata Sidebar (32%) -->
+      <aside class="jira-sidebar">
+        <div class="sidebar-section">
+          <h4 class="sidebar-section-title">Сведения о задаче</h4>
+
+          <div class="meta-field">
+            <label class="meta-label" for="detailStatus">Статус</label>
+            <div class="meta-value">
+              <select id="detailStatus" class="form-control select-sm">
+                <option value="Бэклог">Бэклог</option>
+                <option value="В работе">В работе</option>
+                <option value="Завершено">Завершено</option>
+                <option value="Не реализовано">Не реализовано</option>
+                <option value="Реализовано частично">Реализовано частично</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="meta-field">
+            <label class="meta-label" for="detailAssignee">Исполнитель<br><span class="meta-sublabel">Кто
+                делает</span></label>
+            <div class="meta-value">
+              <select id="detailAssignee" class="form-control select-sm">
+                <option value="">Не назначен</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="meta-field">
+            <label class="meta-label" for="detailSp">Сложность (SP)</label>
+            <div class="meta-value">
+              <input type="number" id="detailSp" class="form-control input-sm" placeholder="0" min="0" step="0.5">
+            </div>
+          </div>
+
+          <div class="meta-field">
+            <label class="meta-label" for="detailInSprint">Спринт</label>
+            <div class="meta-value">
+              <select id="detailInSprint" class="form-control select-sm">
+                <option value="0">В бэклоге</option>
+                <option value="1">В спринте</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <div class="sidebar-section">
+          <h4 class="sidebar-section-title">Участники и даты</h4>
+
+          <div class="meta-field">
+            <span class="meta-label">Автор<br><span class="meta-sublabel">Кто создал</span></span>
+            <div class="meta-value" id="detailCreatedBy">—</div>
+          </div>
+
+          <div class="meta-field">
+            <span class="meta-label">Создано<br><span class="meta-sublabel">Когда создал</span></span>
+            <div class="meta-value" id="detailCreatedAt">—</div>
+          </div>
+
+          <div class="meta-field">
+            <span class="meta-label">Приступил<br><span class="meta-sublabel">Когда начал</span></span>
+            <div class="meta-value" id="detailStartedAt">—</div>
+          </div>
+
+          <div class="meta-field">
+            <span class="meta-label">Обновлено</span>
+            <div class="meta-value" id="detailUpdatedAt">—</div>
+          </div>
+        </div>
+      </aside>
+    </div>
+  </div>
+
+  <!-- =========================================================================
+       FULL-PAGE VIEW: CREATE TASK
+       ========================================================================= -->
+  <div class="fullpage-view" id="fullpageCreateTask" style="display: none;">
+    <div class="fullpage-header">
+      <div class="fullpage-header-left">
+        <button class="btn btn-ghost btn-back" id="btnBackFromCreate">
+          <span class="back-arrow">&larr;</span> Назад к списку
+        </button>
+        <span class="breadcrumb-separator">/</span>
+        <span class="fullpage-title">Новая задача</span>
+      </div>
+    </div>
+
+    <div class="fullpage-body form-page-layout">
+      <form id="formCreateTask" class="fullpage-form">
+        <div class="form-group">
+          <label for="createTitle">Название задачи *</label>
+          <input type="text" id="createTitle" class="form-control form-control-lg"
+            placeholder="Краткое и понятное название" required autofocus>
+        </div>
+
+        <div class="form-group">
+          <label for="createDescription">Описание</label>
+          <textarea id="createDescription" class="form-control" rows="8"
+            placeholder="Технические требования, подробности, критерии приемки..."></textarea>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group flex-1">
+            <label for="createSp">Story Points (сложность)</label>
+            <input type="number" id="createSp" class="form-control" placeholder="Например: 1, 2, 3, 5, 8..." min="0"
+              step="0.5">
+          </div>
+
+          <div class="form-group flex-1">
+            <label for="createAssignee">Исполнитель (кто делает)</label>
+            <select id="createAssignee" class="form-control">
+              <option value="">Не назначен</option>
+            </select>
+          </div>
+
+          <div class="form-group flex-1">
+            <label for="createSprint">Куда поместить</label>
+            <select id="createSprint" class="form-control">
+              <option value="0">В бэклог</option>
+              <option value="1">В активный спринт</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-actions-bar">
+          <button type="button" class="btn btn-secondary" id="btnCancelCreate">Отмена</button>
+          <button type="submit" class="btn btn-primary">Создать задачу</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- =========================================================================
+       FULL-PAGE VIEW: SPLIT PARTIAL TASK
+       ========================================================================= -->
+  <div class="fullpage-view" id="fullpageSplitTask" style="display: none;">
+    <div class="fullpage-header">
+      <div class="fullpage-header-left">
+        <button class="btn btn-ghost btn-back" id="btnBackFromSplit">
+          <span class="back-arrow">&larr;</span> Назад к задаче
+        </button>
+        <span class="breadcrumb-separator">/</span>
+        <span class="fullpage-title">Занесение нереализованной части в бэклог</span>
+      </div>
+    </div>
+
+    <div class="fullpage-body form-page-layout">
+      <form id="formSplitTask" class="fullpage-form">
+        <div class="form-group">
+          <label for="splitTitle">Название новой задачи в бэклоге *</label>
+          <input type="text" id="splitTitle" class="form-control form-control-lg" required>
+        </div>
+
+        <div class="form-group">
+          <label for="splitDescription">Описание остатка</label>
+          <textarea id="splitDescription" class="form-control" rows="6"></textarea>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group flex-1">
+            <label for="splitSp">Оставшиеся Story Points</label>
+            <input type="number" id="splitSp" class="form-control" placeholder="0" min="0" step="0.5">
+          </div>
+
+          <div class="form-group flex-1">
+            <label for="splitAssignee">Назначить на</label>
+            <select id="splitAssignee" class="form-control">
+              <option value="">Не назначен (в бэклог)</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-actions-bar">
+          <button type="button" class="btn btn-secondary" id="btnCancelSplit">Отмена</button>
+          <button type="submit" class="btn btn-primary">Создать задачу в бэклоге</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- =========================================================================
+       AUTH FULLSCREEN
+       ========================================================================= -->
+  <div class="auth-fullscreen" id="modalAuth" style="display: none;">
+    <div class="auth-card">
+      <div class="auth-header">
+        <div class="brand brand-lg">
+          <span class="brand-dot"></span>
+          <span class="brand-name">KLUKVA</span>
+        </div>
+        <p class="auth-subtitle">Управление задачами без визуального шума</p>
+      </div>
+
+      <div class="auth-tabs">
+        <button class="auth-tab-btn active" id="authTabLogin">Вход</button>
+        <button class="auth-tab-btn" id="authTabRegister">Регистрация</button>
+      </div>
+
+      <form id="formAuth">
+        <div class="form-group">
+          <label for="authUsername">Имя пользователя (логин) *</label>
+          <input type="text" id="authUsername" class="form-control" placeholder="Например: ivan" required
+            autocomplete="username">
+        </div>
+
+        <div class="form-group" id="groupDisplayName" style="display: none;">
+          <label for="authDisplayName">Отображаемое имя</label>
+          <input type="text" id="authDisplayName" class="form-control" placeholder="Например: Иван Петров">
+        </div>
+
+        <div class="form-group">
+          <label for="authPassword">Пароль *</label>
+          <input type="password" id="authPassword" class="form-control" placeholder="Пароль" required
+            autocomplete="current-password">
+        </div>
+
+        <div class="auth-error" id="authErrorMsg" style="display: none;"></div>
+
+        <button type="submit" class="btn btn-primary btn-block btn-lg" id="btnAuthSubmit">Войти</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- =========================================================================
+       MODAL: CREATE SPRINT
+       ========================================================================= -->
+  <div class="modal-overlay" id="modalCreateSprint" style="display: none;">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3 class="modal-title">Создание нового спринта</h3>
+        <button type="button" class="btn-close-modal" id="btnCancelSprintModal">&times;</button>
+      </div>
+      <form id="formCreateSprint">
+        <div class="form-group">
+          <label for="inputSprintName">Название спринта *</label>
+          <input type="text" id="inputSprintName" class="form-control form-control-lg" placeholder="Например: Спринт 1"
+            required>
+        </div>
+        <div class="form-group">
+          <label for="inputSprintGoal">Цель спринта (необязательно)</label>
+          <textarea id="inputSprintGoal" class="form-control" rows="3"
+            placeholder="Главная цель или результаты этого спринта..."></textarea>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" id="btnCancelSprintModal2">Отмена</button>
+          <button type="submit" class="btn btn-primary" id="btnSubmitSprint">Начать спринт</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Toast Notification Container -->
+  <div class="toast-container" id="toastContainer"></div>
+
+  <!-- Floating Theme Switcher Button -->
+  <button id="btnThemeToggle" class="theme-toggle-fab" title="Переключить тему">
+    <span id="themeToggleText">Тёмная тема</span>
+  </button>
+
+  <script src="/static/app.js"></script>
+</body>
+
+</html>

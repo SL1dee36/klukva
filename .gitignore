@@ -1,0 +1,4 @@
+__*
+*.bat
+__pycache__
+*.json
