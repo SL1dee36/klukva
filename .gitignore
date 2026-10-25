@@ -9,3 +9,5 @@ deploy_to_server.py
 *.env
 *.key
 *.pem
+*.spec
+build/

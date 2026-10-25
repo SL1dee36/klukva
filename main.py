@@ -13,8 +13,28 @@ from fastapi.staticfiles import StaticFiles
 
 from backend.routes import router as api_router
 
+import sys
+
+def get_frontend_dir() -> str:
+    env_f = os.environ.get("KLUKVA_FRONTEND_DIR")
+    if env_f and os.path.exists(env_f):
+        return os.path.abspath(env_f)
+
+    if getattr(sys, "frozen", False):
+        exe_dir = os.path.dirname(os.path.abspath(sys.executable))
+        parent_dir = os.path.dirname(exe_dir)
+        repo_frontend = os.path.join(parent_dir, "frontend")
+        if os.path.exists(repo_frontend):
+            return repo_frontend
+        meipass_frontend = os.path.join(getattr(sys, "_MEIPASS", exe_dir), "frontend")
+        if os.path.exists(meipass_frontend):
+            return meipass_frontend
+
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(base_dir, "frontend")
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-FRONTEND_DIR = os.path.join(BASE_DIR, "frontend")
+FRONTEND_DIR = get_frontend_dir()
 
 app = FastAPI(
     title="Klukva",

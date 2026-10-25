@@ -8,10 +8,25 @@ import os
 import tempfile
 import threading
 import re
+import sys
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-DB_FILE_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "klukva_db.json"))
+def get_db_file_path() -> str:
+    if os.environ.get("KLUKVA_DB_PATH"):
+        return os.path.abspath(os.environ["KLUKVA_DB_PATH"])
+
+    if getattr(sys, "frozen", False):
+        exe_dir = os.path.dirname(os.path.abspath(sys.executable))
+        parent_dir = os.path.dirname(exe_dir)
+        candidate = os.path.join(parent_dir, "klukva_db.json")
+        if os.path.exists(candidate) or os.path.exists(os.path.join(parent_dir, ".git")):
+            return candidate
+        return os.path.join(exe_dir, "klukva_db.json")
+
+    return os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "klukva_db.json"))
+
+DB_FILE_PATH = get_db_file_path()
 
 _lock = threading.Lock()
 

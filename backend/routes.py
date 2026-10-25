@@ -2,6 +2,9 @@
 FastAPI route handlers for Klukva task tracker.
 """
 
+import os
+import sys
+import subprocess
 import re
 from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -408,4 +411,99 @@ def delete_comment(
 
     success = db.delete_comment(comment_id)
     return {"ok": success}
+
+
+# ============================================================================
+# SYSTEM / UPDATE
+# ============================================================================
+def find_repo_dir() -> str:
+    env_dir = os.environ.get("KLUKVA_REPO_DIR")
+    if env_dir and os.path.exists(env_dir):
+        return os.path.abspath(env_dir)
+
+    if getattr(sys, "frozen", False):
+        exe_dir = os.path.dirname(os.path.abspath(sys.executable))
+        parent = os.path.dirname(exe_dir)
+        if os.path.exists(os.path.join(parent, ".git")):
+            return parent
+        if os.path.exists(os.path.join(exe_dir, ".git")):
+            return exe_dir
+
+    this_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    if os.path.exists(os.path.join(this_dir, ".git")):
+        return this_dir
+
+    cwd = os.getcwd()
+    if os.path.exists(os.path.join(cwd, ".git")):
+        return cwd
+
+    return this_dir
+
+
+def pull_repo_changes(repo_dir: str) -> Dict[str, Any]:
+    try:
+        check_git = subprocess.run(["git", "--version"], capture_output=True, text=True, timeout=5)
+        if check_git.returncode != 0:
+            return {"ok": False, "error": "Git не найден в системе."}
+    except Exception:
+        return {"ok": False, "error": "Git не найден в системе. Убедитесь, что Git установлен."}
+
+    git_dir = os.path.join(repo_dir, ".git")
+    if not os.path.exists(git_dir):
+        return {"ok": False, "error": f"Каталог {repo_dir} не является Git-репозиторием."}
+
+    try:
+        res = subprocess.run(
+            ["git", "pull", "--autostash", "origin", "main"],
+            cwd=repo_dir,
+            capture_output=True,
+            text=True,
+            timeout=45,
+            encoding="utf-8",
+            errors="replace"
+        )
+        stdout = (res.stdout or "").strip()
+        stderr = (res.stderr or "").strip()
+
+        if res.returncode != 0:
+            res2 = subprocess.run(
+                ["git", "pull", "--autostash"],
+                cwd=repo_dir,
+                capture_output=True,
+                text=True,
+                timeout=45,
+                encoding="utf-8",
+                errors="replace"
+            )
+            stdout = (res2.stdout or "").strip()
+            stderr = (res2.stderr or "").strip()
+            if res2.returncode != 0:
+                return {
+                    "ok": False,
+                    "error": stderr or stdout or "Ошибка при выполнении git pull",
+                    "output": stdout
+                }
+
+        is_updated = "Already up to date" not in stdout and "Уже обновлено" not in stdout and "Already up-to-date" not in stdout
+        py_changed = any(".py" in line for line in stdout.splitlines())
+
+        return {
+            "ok": True,
+            "updated": is_updated,
+            "py_changed": py_changed,
+            "message": stdout or "Успешно обновлено",
+            "output": stdout
+        }
+    except Exception as e:
+        return {
+            "ok": False,
+            "error": str(e)
+        }
+
+
+@router.post("/system/update")
+def trigger_update():
+    """Pulls latest changes from Git repository."""
+    repo_dir = find_repo_dir()
+    return pull_repo_changes(repo_dir)
 

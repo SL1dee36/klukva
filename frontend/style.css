@@ -242,6 +242,23 @@ body {
   color: var(--text-main);
 }
 
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.spinning {
+  display: inline-block;
+  animation: spin 0.8s linear infinite;
+}
+
+#btnAppUpdate {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 500;
+}
+
 .nav-tabs {
   display: flex;
   align-items: center;

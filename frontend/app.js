@@ -230,6 +230,39 @@ async function handleCloseSprint() {
   }
 }
 
+// ---------------- ОБНОВЛЕНИЕ ИЗ РЕПОЗИТОРИЯ ----------------
+async function handleAppUpdate() {
+  const btn = document.getElementById("btnAppUpdate");
+  const icon = document.getElementById("btnUpdateIcon");
+  const text = document.getElementById("btnUpdateText");
+  if (!btn) return;
+
+  btn.disabled = true;
+  if (icon) icon.classList.add("spinning");
+  if (text) text.textContent = "Обновление...";
+
+  try {
+    const res = await api("/api/system/update", { method: "POST" });
+    if (!res.ok) {
+      showToast(`Ошибка обновления: ${res.error || "Неизвестная ошибка"}`);
+    } else if (res.updated) {
+      showToast("Программа успешно обновлена из репозитория! Перезагрузка страницы...");
+      setTimeout(() => {
+        window.location.reload();
+      }, 1200);
+      return;
+    } else {
+      showToast("Установлена актуальная версия. Изменений в репозитории нет.");
+    }
+  } catch (err) {
+    showToast(`Ошибка запроса обновления: ${err.message}`);
+  } finally {
+    btn.disabled = false;
+    if (icon) icon.classList.remove("spinning");
+    if (text) text.textContent = "Обновить";
+  }
+}
+
 // ---------------- СЕТЕВЫЕ ЗАПРОСЫ (API) ----------------
 async function api(path, options = {}) {
   const headers = {
@@ -1456,6 +1489,12 @@ function setupEventListeners() {
     try { sessionStorage.removeItem("klukva_filters"); } catch (e) {}
     loadTasks();
   });
+
+  // Кнопка обновления из репозитория
+  const btnAppUpdate = document.getElementById("btnAppUpdate");
+  if (btnAppUpdate) {
+    btnAppUpdate.addEventListener("click", handleAppUpdate);
+  }
 
   // Сохранение положения при прокрутке и перед выгрузкой страницы
   window.addEventListener("scroll", debouncedSavePosition, { passive: true });
