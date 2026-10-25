@@ -42,6 +42,14 @@ if os.path.exists(FRONTEND_DIR):
     app.mount("/static", StaticFiles(directory=FRONTEND_DIR), name="static")
 
 
+@app.get("/favicon.ico")
+async def favicon():
+    fav_path = os.path.join(FRONTEND_DIR, "favicon.svg")
+    if os.path.exists(fav_path):
+        return FileResponse(fav_path, media_type="image/svg+xml")
+    return {"message": "Favicon not found"}
+
+
 @app.get("/")
 async def root():
     index_path = os.path.join(FRONTEND_DIR, "index.html")

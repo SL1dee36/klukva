@@ -234,12 +234,24 @@ async def run_tests():
         assert res.status_code == 200
         close_res = res.json()
         assert close_res["ok"] is True
+        assert close_res["new_sprint"] is not None
+        assert close_res["new_sprint"]["name"] == "Спринт 2"
 
-        # Check no active sprint now
+        # Check new active sprint is now active
         res = await client.get("/api/sprints/active", headers=headers_alice)
         assert res.status_code == 200
-        assert res.json() is None
-        print("Sprint lifecycle (create, get active, close) verified successfully.")
+        new_active = res.json()
+        assert new_active is not None
+        assert new_active["name"] == "Спринт 2"
+        assert new_active["status"] == "active"
+
+        # Check that unfinished task1 moved into the new sprint
+        res = await client.get(f"/api/tasks/{task1['id']}", headers=headers_alice)
+        assert res.status_code == 200
+        t1_data = res.json()
+        assert t1_data["in_sprint"] is True
+        assert t1_data["sprint_id"] == new_active["id"]
+        print("Sprint lifecycle (close old, roll over unfinished tasks into new active sprint) verified successfully.")
 
         print("--- 9. Verifying JSON Database File ---")
         db_path = db.file_path

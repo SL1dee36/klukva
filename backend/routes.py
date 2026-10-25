@@ -60,6 +60,11 @@ class SprintCreateRequest(BaseModel):
     goal: Optional[str] = ""
 
 
+class SprintCloseRequest(BaseModel):
+    create_next_sprint: bool = True
+    next_sprint_name: Optional[str] = None
+
+
 class SplitPartialRequest(BaseModel):
     title: str = Field(..., min_length=1, max_length=256)
     description: Optional[str] = ""
@@ -232,8 +237,14 @@ def create_sprint(req: SprintCreateRequest, current_user: Dict = Depends(get_cur
 
 
 @router.post("/sprints/{sprint_id}/close")
-def close_sprint(sprint_id: int, current_user: Dict = Depends(get_current_user)):
-    result = db.close_sprint(sprint_id)
+def close_sprint(
+    sprint_id: int,
+    req: Optional[SprintCloseRequest] = None,
+    current_user: Dict = Depends(get_current_user)
+):
+    create_next = req.create_next_sprint if req else True
+    next_name = req.next_sprint_name if req else None
+    result = db.close_sprint(sprint_id, create_next_sprint=create_next, next_sprint_name=next_name)
     if not result:
         raise HTTPException(status_code=404, detail="Спринт не найден")
     return result

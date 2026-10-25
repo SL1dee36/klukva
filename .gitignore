@@ -1,4 +1,11 @@
 __*
+!__init__.py
 *.bat
 __pycache__
 *.json
+update_site.py
+deploy_to_server.py
+.env
+*.env
+*.key
+*.pem

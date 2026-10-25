@@ -7,6 +7,7 @@ import json
 import os
 import tempfile
 import threading
+import re
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -349,12 +350,17 @@ class JSONDatabase:
             if "sprint_id" not in data["counters"]:
                 data["counters"]["sprint_id"] = len(data["sprints"])
 
-            # Close any currently active sprint before starting a new one
             now = datetime.utcnow().isoformat() + "Z"
+            # Close any currently active sprint before starting a new one
             for s in data["sprints"]:
                 if s.get("status") == "active":
                     s["status"] = "closed"
                     s["closed_at"] = now
+                    # Completed tasks stay completed with this sprint and are not in sprint anymore
+                    for t in data.get("tasks", []):
+                        if (bool(t.get("in_sprint", False)) or t.get("sprint_id") == s["id"]) and t.get("status") == "Завершено":
+                            t["in_sprint"] = False
+                            t["sprint_id"] = s["id"]
 
             data["counters"]["sprint_id"] += 1
             sprint_id = data["counters"]["sprint_id"]
@@ -370,7 +376,7 @@ class JSONDatabase:
             }
             data["sprints"].append(new_sprint)
 
-            # Link any tasks currently marked in_sprint to this new active sprint
+            # Link any unfinished tasks currently marked in_sprint to this new active sprint
             for t in data.get("tasks", []):
                 if bool(t.get("in_sprint", False)):
                     t["sprint_id"] = sprint_id
@@ -378,7 +384,12 @@ class JSONDatabase:
             self._atomic_write(data)
             return new_sprint
 
-    def close_sprint(self, sprint_id: int) -> Optional[Dict[str, Any]]:
+    def close_sprint(
+        self,
+        sprint_id: int,
+        create_next_sprint: bool = True,
+        next_sprint_name: Optional[str] = None
+    ) -> Optional[Dict[str, Any]]:
         with _lock:
             data = self._read_data()
             target_sprint = None
@@ -394,9 +405,44 @@ class JSONDatabase:
             target_sprint["status"] = "closed"
             target_sprint["closed_at"] = now
 
-            # Process sprint tasks: completed tasks stay associated with sprint, unfinished tasks return to backlog
+            if "counters" not in data:
+                data["counters"] = {}
+            if "sprint_id" not in data["counters"]:
+                data["counters"]["sprint_id"] = len(data.get("sprints", []))
+
+            new_sprint = None
+            if create_next_sprint:
+                data["counters"]["sprint_id"] += 1
+                new_sprint_id = data["counters"]["sprint_id"]
+
+                if next_sprint_name and next_sprint_name.strip():
+                    name = next_sprint_name.strip()
+                else:
+                    curr_name = target_sprint.get("name", "")
+                    match = re.search(r'(\d+)\s*$', curr_name.strip())
+                    if match:
+                        prefix = curr_name[:match.start(1)]
+                        num = int(match.group(1)) + 1
+                        name = f"{prefix}{num}"
+                    else:
+                        name = f"Спринт {new_sprint_id}"
+
+                new_sprint = {
+                    "id": new_sprint_id,
+                    "name": name,
+                    "goal": "",
+                    "status": "active",
+                    "created_at": now,
+                    "closed_at": None,
+                    "created_by": target_sprint.get("created_by", "")
+                }
+                data["sprints"].append(new_sprint)
+
+            # Process sprint tasks:
+            # 1. Completed tasks stay associated with the closed sprint and NEVER return to backlog.
+            # 2. Uncompleted tasks placed in sprint move to the new sprint, NEVER return to backlog.
             completed_count = 0
-            backlog_count = 0
+            moved_count = 0
 
             for t in data.get("tasks", []):
                 if bool(t.get("in_sprint", False)) or t.get("sprint_id") == sprint_id:
@@ -405,18 +451,20 @@ class JSONDatabase:
                         t["in_sprint"] = False
                         t["sprint_id"] = sprint_id
                     else:
-                        # Move unfinished task back to backlog
-                        t["in_sprint"] = False
-                        t["sprint_id"] = None
+                        # Move unfinished task to the new sprint!
+                        moved_count += 1
+                        t["in_sprint"] = True
+                        t["sprint_id"] = new_sprint["id"] if new_sprint else None
                         t["updated_at"] = now
-                        backlog_count += 1
 
             self._atomic_write(data)
             return {
                 "ok": True,
                 "sprint": target_sprint,
+                "new_sprint": new_sprint,
                 "completed_count": completed_count,
-                "backlog_count": backlog_count
+                "moved_count": moved_count,
+                "backlog_count": 0
             }
 
 

@@ -14,16 +14,106 @@ if (paramToken) {
   localStorage.setItem("klukva_token", paramToken);
 }
 
+const savedTab = localStorage.getItem("klukva_active_tab");
+const initialTab = urlParams.get("tab") || savedTab || "backlog";
+
 const state = {
   token: paramToken || localStorage.getItem("klukva_token") || null,
   currentUser: null,
   users: [],
   tasks: [],
   activeSprint: null,
-  currentTab: urlParams.get("tab") || "backlog", // 'backlog' | 'sprints' | 'board'
+  currentTab: initialTab, // 'backlog' | 'sprints' | 'board'
   boardFilterOnlyMy: false,
   currentTaskDetail: null,
 };
+
+// ---------------- СОХРАНЕНИЕ ПОЛОЖЕНИЯ И СОСТОЯНИЯ (TAB, SCROLL, FILTERS) ----------------
+function saveStateAndPosition() {
+  if (state.currentTab) {
+    localStorage.setItem("klukva_active_tab", state.currentTab);
+  }
+
+  const scrolls = {
+    windowX: window.scrollX || 0,
+    windowY: window.scrollY || 0,
+    appLayout: document.querySelector(".app-layout")?.scrollTop || 0,
+    backlogTable: document.querySelector("#viewBacklog .table-scroll-wrapper")?.scrollTop || 0,
+    boardWrapperX: document.querySelector(".scrum-board-wrapper")?.scrollLeft || 0,
+    boardWrapperY: document.querySelector(".scrum-board-wrapper")?.scrollTop || 0,
+    sprintLayout: document.querySelector("#viewSprints .sprint-layout-container")?.scrollTop || 0,
+    sprintTable: document.querySelector("#sectionSprint .table-scroll-wrapper")?.scrollTop || 0,
+    sprintBacklogTable: document.querySelector("#sectionBacklog .table-scroll-wrapper")?.scrollTop || 0,
+  };
+  try {
+    sessionStorage.setItem("klukva_scroll_positions", JSON.stringify(scrolls));
+  } catch (e) {}
+
+  const filters = {
+    status: document.getElementById("filterStatus")?.value || "",
+    sp: document.getElementById("filterSp")?.value || "",
+    assignee: document.getElementById("filterAssignee")?.value || "",
+    search: document.getElementById("filterSearch")?.value || "",
+    onlyMy: state.boardFilterOnlyMy || false
+  };
+  try {
+    sessionStorage.setItem("klukva_filters", JSON.stringify(filters));
+  } catch (e) {}
+}
+
+const debouncedSavePosition = debounce(saveStateAndPosition, 150);
+
+function restoreFilters() {
+  try {
+    const raw = sessionStorage.getItem("klukva_filters");
+    if (!raw) return;
+    const f = JSON.parse(raw);
+    if (f.status && document.getElementById("filterStatus")) document.getElementById("filterStatus").value = f.status;
+    if (f.sp && document.getElementById("filterSp")) document.getElementById("filterSp").value = f.sp;
+    if (f.assignee && document.getElementById("filterAssignee")) document.getElementById("filterAssignee").value = f.assignee;
+    if (f.search && document.getElementById("filterSearch")) document.getElementById("filterSearch").value = f.search;
+    if (f.onlyMy) {
+      state.boardFilterOnlyMy = true;
+      document.getElementById("boardFilterOnlyMy")?.classList.add("active");
+      document.getElementById("boardFilterAll")?.classList.remove("active");
+    }
+  } catch (e) {}
+}
+
+let restoreScrollTimer = null;
+function restoreScrollPositions() {
+  clearTimeout(restoreScrollTimer);
+  restoreScrollTimer = setTimeout(() => {
+    try {
+      const raw = sessionStorage.getItem("klukva_scroll_positions");
+      if (!raw) return;
+      const s = JSON.parse(raw);
+      if (s.windowX || s.windowY) {
+        window.scrollTo(s.windowX || 0, s.windowY || 0);
+      }
+      const appLayout = document.querySelector(".app-layout");
+      if (appLayout && s.appLayout) appLayout.scrollTop = s.appLayout;
+
+      const backlogTable = document.querySelector("#viewBacklog .table-scroll-wrapper");
+      if (backlogTable && s.backlogTable) backlogTable.scrollTop = s.backlogTable;
+
+      const boardWrapper = document.querySelector(".scrum-board-wrapper");
+      if (boardWrapper) {
+        if (s.boardWrapperX) boardWrapper.scrollLeft = s.boardWrapperX;
+        if (s.boardWrapperY) boardWrapper.scrollTop = s.boardWrapperY;
+      }
+
+      const sprintLayout = document.querySelector("#viewSprints .sprint-layout-container");
+      if (sprintLayout && s.sprintLayout) sprintLayout.scrollTop = s.sprintLayout;
+
+      const sprintTable = document.querySelector("#sectionSprint .table-scroll-wrapper");
+      if (sprintTable && s.sprintTable) sprintTable.scrollTop = s.sprintTable;
+
+      const sprintBacklogTable = document.querySelector("#sectionBacklog .table-scroll-wrapper");
+      if (sprintBacklogTable && s.sprintBacklogTable) sprintBacklogTable.scrollTop = s.sprintBacklogTable;
+    } catch (e) {}
+  }, 30);
+}
 
 // ---------------- ТЕМА ОФОРМЛЕНИЯ ----------------
 function initTheme() {
@@ -86,7 +176,12 @@ function updateSprintUI() {
 function openCreateSprintModal() {
   document.getElementById("formCreateSprint").reset();
   const input = document.getElementById("inputSprintName");
-  input.value = "Спринт 1";
+  let nextNum = 1;
+  if (state.activeSprint) {
+    const match = state.activeSprint.name.match(/\d+$/);
+    if (match) nextNum = parseInt(match[0], 10) + 1;
+  }
+  input.value = `Спринт ${nextNum}`;
   document.getElementById("modalCreateSprint").style.display = "flex";
   input.focus();
 }
@@ -117,7 +212,7 @@ async function handleCreateSprintSubmit(e) {
 async function handleCloseSprint() {
   if (!state.activeSprint) return;
   const sprintName = state.activeSprint.name;
-  if (!confirm(`Завершить спринт "${sprintName}"?\nВыполненные задачи сохранятся в истории, а невыполненные вернутся в бэклог.`)) {
+  if (!confirm(`Завершить спринт "${sprintName}"?\nВыполненные задачи останутся в истории спринта, а незавершенные переместятся в новый спринт.`)) {
     return;
   }
 
@@ -125,7 +220,9 @@ async function handleCloseSprint() {
     const result = await api(`/api/sprints/${state.activeSprint.id}/close`, {
       method: "POST"
     });
-    showToast(`Спринт "${sprintName}" завершен. Выполнено: ${result.completed_count}, возвращено в бэклог: ${result.backlog_count}`);
+    const newSprintName = result.new_sprint ? result.new_sprint.name : "";
+    const movedMsg = newSprintName ? ` Перемещено в "${newSprintName}": ${result.moved_count || 0}.` : "";
+    showToast(`Спринт "${sprintName}" завершен. Выполнено: ${result.completed_count || 0}.${movedMsg}`);
     await loadActiveSprint();
     await loadTasks();
   } catch (err) {
@@ -238,13 +335,11 @@ async function onAuthSuccess() {
   hideAuthModal();
   updateUserHeader();
   await loadUsers();
+  restoreFilters();
   await loadActiveSprint();
 
-  if (state.currentTab && state.currentTab !== "backlog") {
-    switchTab(state.currentTab);
-  } else {
-    await loadTasks();
-  }
+  const targetTab = state.currentTab || "backlog";
+  switchTab(targetTab);
 
   const path = window.location.pathname;
   const match = path.match(/\/task\/(\d+)/);
@@ -343,8 +438,18 @@ function renderPureBacklog() {
 
   tbody.innerHTML = "";
 
-  // В бэклоге отображаются только те задачи, которые не включены в спринт
-  const backlogTasks = state.tasks.filter(t => !t.in_sprint);
+  const statusFilter = document.getElementById("filterStatus")?.value;
+
+  // В бэклоге отображаются только задачи бэклога:
+  // 1. Задачи, не включенные в активный спринт (!t.in_sprint)
+  // 2. Задачи, завершенные в рамках спринтов, остаются в истории спринта и НЕ попадают в бэклог
+  // 3. Завершенные задачи по умолчанию скрыты в бэклоге (если фильтр статуса не выбран явно как "Завершено")
+  const backlogTasks = state.tasks.filter(t => {
+    if (t.in_sprint) return false;
+    if (t.sprint_id && t.status === "Завершено") return false;
+    if (!statusFilter && t.status === "Завершено") return false;
+    return true;
+  });
 
   let totalSp = 0;
   backlogTasks.forEach(t => {
@@ -431,6 +536,8 @@ function renderPureBacklog() {
   if (filterDot) {
     filterDot.style.display = (statusVal || spVal || assigneeVal || searchVal) ? "inline" : "none";
   }
+
+  restoreScrollPositions();
 }
 
 // ============================================================================
@@ -453,7 +560,8 @@ function renderSprintsView() {
   backlogTbody.innerHTML = "";
 
   const sprintTasks = state.tasks.filter(t => Boolean(t.in_sprint));
-  const backlogTasks = state.tasks.filter(t => !t.in_sprint);
+  // В секцию бэклога спринтов (для добавления в спринт) попадают только незавершенные задачи вне спринта
+  const backlogTasks = state.tasks.filter(t => !t.in_sprint && t.status !== "Завершено" && !t.sprint_id);
 
   let sprintSp = 0;
   let backlogSp = 0;
@@ -475,6 +583,7 @@ function renderSprintsView() {
   backlogSubStats.textContent = `${backlogTasks.length} ${pluralizeTasks(backlogTasks.length)} • ${backlogSp} SP`;
 
   renderPastSprintsHistory();
+  restoreScrollPositions();
 }
 
 function createDraggableTaskRow(task, inSprint) {
@@ -815,6 +924,8 @@ function renderScrumBoard() {
   if (unassignedTasks.length > 0) {
     renderSwimlane(container, "Не назначенные задачи", null, unassignedTasks, STATUS_COLUMNS);
   }
+
+  restoreScrollPositions();
 }
 
 function renderSwimlane(parent, title, username, tasks, columns) {
@@ -1005,7 +1116,11 @@ async function openTaskDetail(taskId) {
 function closeTaskDetail() {
   document.getElementById("fullpageTaskDetail").style.display = "none";
   state.currentTaskDetail = null;
-  window.history.pushState({}, "", "/");
+  const currentUrl = new URL(window.location.origin + "/");
+  if (state.currentTab) {
+    currentUrl.searchParams.set("tab", state.currentTab);
+  }
+  window.history.pushState({ tab: state.currentTab }, "", currentUrl.toString());
   loadTasks();
 }
 
@@ -1309,6 +1424,7 @@ function setupEventListeners() {
     state.boardFilterOnlyMy = true;
     document.getElementById("boardFilterOnlyMy").classList.add("active");
     document.getElementById("boardFilterAll").classList.remove("active");
+    debouncedSavePosition();
     renderScrumBoard();
   });
 
@@ -1316,6 +1432,7 @@ function setupEventListeners() {
     state.boardFilterOnlyMy = false;
     document.getElementById("boardFilterAll").classList.add("active");
     document.getElementById("boardFilterOnlyMy").classList.remove("active");
+    debouncedSavePosition();
     renderScrumBoard();
   });
 
@@ -1327,16 +1444,34 @@ function setupEventListeners() {
   document.getElementById("formCreateSprint").addEventListener("submit", handleCreateSprintSubmit);
 
   // Фильтры списка задач
-  document.getElementById("filterStatus").addEventListener("change", loadTasks);
-  document.getElementById("filterSp").addEventListener("input", debounce(loadTasks, 300));
-  document.getElementById("filterAssignee").addEventListener("change", loadTasks);
-  document.getElementById("filterSearch").addEventListener("input", debounce(loadTasks, 300));
+  document.getElementById("filterStatus").addEventListener("change", () => { debouncedSavePosition(); loadTasks(); });
+  document.getElementById("filterSp").addEventListener("input", debounce(() => { debouncedSavePosition(); loadTasks(); }, 300));
+  document.getElementById("filterAssignee").addEventListener("change", () => { debouncedSavePosition(); loadTasks(); });
+  document.getElementById("filterSearch").addEventListener("input", debounce(() => { debouncedSavePosition(); loadTasks(); }, 300));
   document.getElementById("btnResetFilters").addEventListener("click", () => {
     document.getElementById("filterStatus").value = "";
     document.getElementById("filterSp").value = "";
     document.getElementById("filterAssignee").value = "";
     document.getElementById("filterSearch").value = "";
+    try { sessionStorage.removeItem("klukva_filters"); } catch (e) {}
     loadTasks();
+  });
+
+  // Сохранение положения при прокрутке и перед выгрузкой страницы
+  window.addEventListener("scroll", debouncedSavePosition, { passive: true });
+  window.addEventListener("beforeunload", saveStateAndPosition);
+  window.addEventListener("pagehide", saveStateAndPosition);
+
+  // Слушатели скролла на ключевых прокручиваемых контейнерах
+  [
+    document.querySelector(".app-layout"),
+    document.querySelector("#viewBacklog .table-scroll-wrapper"),
+    document.querySelector("#viewSprints .sprint-layout-container"),
+    document.querySelector("#sectionSprint .table-scroll-wrapper"),
+    document.querySelector("#sectionBacklog .table-scroll-wrapper"),
+    document.querySelector(".scrum-board-wrapper")
+  ].forEach(el => {
+    if (el) el.addEventListener("scroll", debouncedSavePosition, { passive: true });
   });
 
   // Переключение мобильной панели фильтров
@@ -1467,12 +1602,29 @@ function setupEventListeners() {
       document.getElementById("fullpageTaskDetail").style.display = "none";
       document.getElementById("fullpageCreateTask").style.display = "none";
       document.getElementById("fullpageSplitTask").style.display = "none";
+      const targetTab = (e.state && e.state.tab) || urlParams.get("tab") || localStorage.getItem("klukva_active_tab") || "backlog";
+      if (targetTab !== state.currentTab) {
+        switchTab(targetTab, false);
+      }
     }
   });
 }
 
-function switchTab(tab) {
+function switchTab(tab, updateUrl = true) {
   state.currentTab = tab;
+  localStorage.setItem("klukva_active_tab", tab);
+  debouncedSavePosition();
+
+  if (updateUrl) {
+    try {
+      const currentUrl = new URL(window.location.href);
+      if (!currentUrl.pathname.startsWith("/task/")) {
+        currentUrl.searchParams.set("tab", tab);
+        window.history.replaceState({ tab }, "", currentUrl.toString());
+      }
+    } catch (e) {}
+  }
+
   document.querySelectorAll(".tab-btn").forEach(btn => {
     btn.classList.toggle("active", btn.dataset.tab === tab);
   });
