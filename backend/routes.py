@@ -6,18 +6,22 @@ import os
 import sys
 import subprocess
 import re
+import uuid
+import mimetypes
 from typing import Any, Dict, List, Optional
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from backend.auth import (
     create_session,
     get_current_user,
+    get_user_from_token,
     hash_password,
     invalidate_session,
     verify_password,
 )
-from backend.db import VALID_STATUSES, db
+from backend.db import ATTACHMENTS_DIR, VALID_STATUSES, db
 
 router = APIRouter(prefix="/api")
 
@@ -475,6 +479,108 @@ def delete_link(task_id: int, link_id: int, current_user: Dict = Depends(get_cur
     out_label, in_label = _labels(link)
     _link_comment(link["source_id"], link["target_id"], out_label, True, current_user["username"])
     _link_comment(link["target_id"], link["source_id"], in_label, True, current_user["username"])
+    return {"ok": True}
+
+
+# ============================================================================
+# TASK ATTACHMENTS
+# ============================================================================
+MAX_ATTACHMENT_SIZE = 20 * 1024 * 1024  # 20 MB
+
+
+def _user_from_header_or_query(authorization: Optional[str], token: Optional[str]) -> Dict:
+    raw = authorization or token
+    if raw:
+        parts = raw.split(" ")
+        user = get_user_from_token(parts[1] if len(parts) == 2 and parts[0].lower() == "bearer" else raw)
+        if user:
+            return user
+    raise HTTPException(status_code=401, detail="Требуется авторизация")
+
+
+@router.get("/tasks/{task_id}/attachments")
+def list_attachments(task_id: int, current_user: Dict = Depends(get_current_user)):
+    if not db.get_task_by_id(task_id):
+        raise HTTPException(status_code=404, detail="Задача не найдена")
+    return db.get_attachments(task_id)
+
+
+@router.post("/tasks/{task_id}/attachments", status_code=201)
+async def upload_attachment(
+    task_id: int,
+    request: Request,
+    filename: str = Query(..., min_length=1, max_length=255),
+    current_user: Dict = Depends(get_current_user),
+):
+    if not db.get_task_by_id(task_id):
+        raise HTTPException(status_code=404, detail="Задача не найдена")
+    declared = request.headers.get("content-length")
+    if declared and declared.isdigit() and int(declared) > MAX_ATTACHMENT_SIZE:
+        raise HTTPException(status_code=413, detail="Файл больше 20 МБ")
+
+    safe_name = os.path.basename(filename.replace("\\", "/")).strip() or "file"
+    os.makedirs(ATTACHMENTS_DIR, exist_ok=True)
+    stored_name = f"{uuid.uuid4().hex}{os.path.splitext(safe_name)[1][:16]}"
+    path = os.path.join(ATTACHMENTS_DIR, stored_name)
+    size = 0
+    try:
+        with open(path, "wb") as f:
+            async for chunk in request.stream():
+                size += len(chunk)
+                if size > MAX_ATTACHMENT_SIZE:
+                    raise HTTPException(status_code=413, detail="Файл больше 20 МБ")
+                f.write(chunk)
+    except BaseException:
+        if os.path.exists(path):
+            os.remove(path)
+        raise
+    if size == 0:
+        os.remove(path)
+        raise HTTPException(status_code=400, detail="Пустой файл")
+
+    content_type = (request.headers.get("content-type") or "").split(";")[0].strip()
+    if not content_type or content_type == "application/octet-stream":
+        content_type = mimetypes.guess_type(safe_name)[0] or "application/octet-stream"
+    att = db.add_attachment(task_id, safe_name, stored_name, size, content_type, current_user["username"])
+    db.add_comment(task_id=task_id, author="Klukva",
+                   text=f"{current_user['username']} прикрепил файл: {safe_name}", mentions=[])
+    return att
+
+
+@router.get("/tasks/{task_id}/attachments/{att_id}/file")
+def get_attachment_file(
+    task_id: int,
+    att_id: int,
+    download: bool = False,
+    token: Optional[str] = None,
+    authorization: Optional[str] = Header(None),
+):
+    _user_from_header_or_query(authorization, token)
+    att = db.get_attachment(att_id)
+    if not att or att["task_id"] != task_id:
+        raise HTTPException(status_code=404, detail="Файл не найден")
+    path = os.path.join(ATTACHMENTS_DIR, att["stored_name"])
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="Файл отсутствует на диске")
+    return FileResponse(
+        path,
+        media_type=att["content_type"],
+        filename=att["filename"],
+        content_disposition_type="attachment" if download else "inline",
+    )
+
+
+@router.delete("/tasks/{task_id}/attachments/{att_id}")
+def delete_attachment(task_id: int, att_id: int, current_user: Dict = Depends(get_current_user)):
+    att = db.get_attachment(att_id)
+    if not att or att["task_id"] != task_id:
+        raise HTTPException(status_code=404, detail="Файл не найден")
+    db.delete_attachment(att_id)
+    path = os.path.join(ATTACHMENTS_DIR, att["stored_name"])
+    if os.path.exists(path):
+        os.remove(path)
+    db.add_comment(task_id=task_id, author="Klukva",
+                   text=f"{current_user['username']} удалил файл: {att['filename']}", mentions=[])
     return {"ok": True}
 
 

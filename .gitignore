@@ -11,3 +11,4 @@ deploy_to_server.py
 *.pem
 *.spec
 build/
+klukva_attachments/

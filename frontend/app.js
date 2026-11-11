@@ -1142,6 +1142,7 @@ async function openTaskDetail(taskId) {
     renderComments(task.comments || []);
     resetLinkForm();
     loadLinks(taskId);
+    loadAttachments(taskId);
 
     document.getElementById("fullpageTaskDetail").style.display = "flex";
     window.history.pushState({ page: "task", id: taskId }, "", `/task/${taskId}`);
@@ -1259,6 +1260,176 @@ async function refreshAfterLinkChange(taskId) {
   state.currentTaskDetail.comments = comments;
   renderComments(comments);
   loadTasks();
+}
+
+// ---------------- ВЛОЖЕНИЯ (ФАЙЛЫ) ----------------
+const MAX_ATTACHMENT_SIZE = 20 * 1024 * 1024;
+
+function formatFileSize(bytes) {
+  if (bytes < 1024) return `${bytes} Б`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} КБ`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} МБ`;
+}
+
+function attachmentUrl(taskId, att, download = false) {
+  const q = new URLSearchParams({ token: state.token || "" });
+  if (download) q.set("download", "true");
+  return `/api/tasks/${taskId}/attachments/${att.id}/file?${q}`;
+}
+
+function attachmentKind(att) {
+  const ct = att.content_type || "";
+  if (ct.startsWith("image/")) return "image";
+  if (ct.startsWith("video/")) return "video";
+  if (ct.startsWith("audio/")) return "audio";
+  if (ct === "application/pdf") return "pdf";
+  return "other";
+}
+
+async function loadAttachments(taskId) {
+  const container = document.getElementById("attachmentsList");
+  closeAttachmentPreview();
+  try {
+    const atts = await api(`/api/tasks/${taskId}/attachments`);
+    if (!state.currentTaskDetail || state.currentTaskDetail.id !== taskId) return;
+    if (!atts.length) {
+      container.innerHTML = '<div class="links-empty">Файлов нет</div>';
+      return;
+    }
+    container.innerHTML = "";
+    atts.forEach(att => {
+      const kind = attachmentKind(att);
+      const item = document.createElement("div");
+      item.className = "attachment-item";
+      const thumb = kind === "image"
+        ? `<img src="${attachmentUrl(taskId, att)}" alt="" loading="lazy">`
+        : `<span class="attachment-icon">${{ video: "&#9654;", audio: "&#9835;", pdf: "PDF" }[kind] || "&#128196;"}</span>`;
+      item.innerHTML = `
+        <div class="attachment-thumb" title="Просмотр">${thumb}</div>
+        <div class="attachment-info">
+          <div class="attachment-name" title="${escapeHtml(att.filename)}">${escapeHtml(att.filename)}</div>
+          <div class="attachment-meta">${formatFileSize(att.size)} · @${escapeHtml(att.uploaded_by)} · ${formatDate(att.created_at)}</div>
+        </div>
+        <div class="attachment-actions">
+          <a class="attachment-btn" href="${attachmentUrl(taskId, att, true)}" download title="Скачать">&#11015;</a>
+          <button type="button" class="attachment-btn attachment-del" title="Удалить">&#10005;</button>
+        </div>`;
+      const open = () => openAttachmentPreview(taskId, att);
+      item.querySelector(".attachment-thumb").onclick = open;
+      item.querySelector(".attachment-name").onclick = open;
+      item.querySelector(".attachment-del").onclick = () => removeAttachment(taskId, att);
+      container.appendChild(item);
+    });
+  } catch (err) {
+    container.innerHTML = `<div class="links-empty">Ошибка: ${escapeHtml(err.message)}</div>`;
+  }
+}
+
+function openAttachmentPreview(taskId, att) {
+  const box = document.getElementById("attachmentPreview");
+  const kind = attachmentKind(att);
+  const url = attachmentUrl(taskId, att);
+  let body;
+  if (kind === "image") body = `<img src="${url}" alt="">`;
+  else if (kind === "video") body = `<video src="${url}" controls autoplay></video>`;
+  else if (kind === "audio") body = `<audio src="${url}" controls autoplay></audio>`;
+  else if (kind === "pdf" || (att.content_type || "").startsWith("text/")) body = `<iframe src="${url}"></iframe>`;
+  else body = `<div class="links-empty">Предпросмотр недоступен. <a href="${attachmentUrl(taskId, att, true)}" download>Скачать файл</a></div>`;
+  box.innerHTML = `
+    <div class="attachment-preview-header">
+      <span>${escapeHtml(att.filename)}</span>
+      <span>
+        <a class="attachment-btn" href="${attachmentUrl(taskId, att, true)}" download title="Скачать">&#11015;</a>
+        <button type="button" class="attachment-btn" id="btnClosePreview" title="Закрыть">&#10005;</button>
+      </span>
+    </div>
+    <div class="attachment-preview-body">${body}</div>`;
+  box.style.display = "block";
+  box.querySelector("#btnClosePreview").onclick = closeAttachmentPreview;
+  box.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+function closeAttachmentPreview() {
+  const box = document.getElementById("attachmentPreview");
+  if (!box) return;
+  box.innerHTML = "";
+  box.style.display = "none";
+}
+
+async function uploadAttachments(files) {
+  if (!state.currentTaskDetail || !files.length) return;
+  const taskId = state.currentTaskDetail.id;
+  let uploaded = 0;
+  for (const file of files) {
+    if (file.size > MAX_ATTACHMENT_SIZE) {
+      showToast(`«${file.name}» отклонён: больше 20 МБ`);
+      continue;
+    }
+    if (file.size === 0) {
+      showToast(`«${file.name}» отклонён: пустой файл`);
+      continue;
+    }
+    try {
+      showToast(`Загрузка «${file.name}»...`);
+      await api(`/api/tasks/${taskId}/attachments?filename=${encodeURIComponent(file.name)}`, {
+        method: "POST",
+        headers: { "Content-Type": file.type || "application/octet-stream" },
+        body: file
+      });
+      uploaded++;
+    } catch (err) {
+      showToast(`Ошибка загрузки «${file.name}»: ${err.message}`);
+    }
+  }
+  if (uploaded) {
+    showToast(uploaded === 1 ? "Файл загружен" : `Загружено файлов: ${uploaded}`);
+    await refreshAfterAttachmentChange(taskId);
+  }
+}
+
+async function removeAttachment(taskId, att) {
+  if (!confirm(`Удалить файл «${att.filename}»?`)) return;
+  try {
+    await api(`/api/tasks/${taskId}/attachments/${att.id}`, { method: "DELETE" });
+    showToast("Файл удалён");
+    await refreshAfterAttachmentChange(taskId);
+  } catch (err) {
+    showToast(`Ошибка: ${err.message}`);
+  }
+}
+
+async function refreshAfterAttachmentChange(taskId) {
+  await loadAttachments(taskId);
+  const comments = await api(`/api/tasks/${taskId}/comments`);
+  if (state.currentTaskDetail && state.currentTaskDetail.id === taskId) {
+    state.currentTaskDetail.comments = comments;
+    renderComments(comments);
+  }
+}
+
+function setupAttachmentListeners() {
+  const input = document.getElementById("attachmentInput");
+  document.getElementById("btnAddAttachment").addEventListener("click", () => input.click());
+  input.addEventListener("change", async () => {
+    const files = Array.from(input.files);
+    input.value = "";
+    await uploadAttachments(files);
+  });
+  const section = document.getElementById("attachmentsSection");
+  ["dragenter", "dragover"].forEach(ev => section.addEventListener(ev, e => {
+    if (!e.dataTransfer || !Array.from(e.dataTransfer.types).includes("Files")) return;
+    e.preventDefault();
+    section.classList.add("drag-over");
+  }));
+  ["dragleave", "drop"].forEach(ev => section.addEventListener(ev, e => {
+    if (ev === "dragleave" && section.contains(e.relatedTarget)) return;
+    section.classList.remove("drag-over");
+  }));
+  section.addEventListener("drop", e => {
+    if (!e.dataTransfer || !e.dataTransfer.files.length) return;
+    e.preventDefault();
+    uploadAttachments(Array.from(e.dataTransfer.files));
+  });
 }
 
 function setupLinkListeners() {
@@ -1573,6 +1744,7 @@ function handleLogout() {
 // ---------------- ОБРАБОТЧИКИ СОБЫТИЙ ----------------
 function setupEventListeners() {
   setupLinkListeners();
+  setupAttachmentListeners();
   // Навигация по вкладкам
   document.getElementById("tabBacklog").addEventListener("click", () => switchTab("backlog"));
   document.getElementById("tabSprints").addEventListener("click", () => switchTab("sprints"));

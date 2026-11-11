@@ -383,6 +383,18 @@
           <div class="links-list" id="linksList"></div>
         </div>
 
+        <!-- Attachments Section -->
+        <div class="jira-section attachments-section" id="attachmentsSection">
+          <div class="links-header">
+            <label class="jira-section-label">Прикреплённые объекты</label>
+            <button type="button" class="btn btn-secondary btn-sm" id="btnAddAttachment">+ Файл</button>
+            <input type="file" id="attachmentInput" multiple style="display: none;">
+          </div>
+          <div class="attachments-hint">Перетащите файлы сюда или нажмите «+ Файл». Максимум 20 МБ.</div>
+          <div class="attachments-list" id="attachmentsList"></div>
+          <div class="attachment-preview" id="attachmentPreview" style="display: none;"></div>
+        </div>
+
         <!-- Comments Section -->
         <div class="jira-section comments-section">
           <label class="jira-section-label">Комментарии и обсуждение</label>

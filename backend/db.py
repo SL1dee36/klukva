@@ -642,5 +642,49 @@ class JSONDatabase:
                     return l
             return None
 
+    # ------------------ ATTACHMENTS ------------------
+    def get_attachments(self, task_id: int) -> List[Dict[str, Any]]:
+        with _lock:
+            data = self._read_data()
+            return [a for a in data.get("attachments", []) if a["task_id"] == task_id]
+
+    def get_attachment(self, att_id: int) -> Optional[Dict[str, Any]]:
+        with _lock:
+            data = self._read_data()
+            return next((a for a in data.get("attachments", []) if a["id"] == att_id), None)
+
+    def add_attachment(self, task_id: int, filename: str, stored_name: str, size: int,
+                       content_type: str, uploaded_by: str) -> Dict[str, Any]:
+        with _lock:
+            data = self._read_data()
+            counters = data.setdefault("counters", {})
+            counters["attachment_id"] = counters.get("attachment_id", 0) + 1
+            att = {
+                "id": counters["attachment_id"],
+                "task_id": task_id,
+                "filename": filename,
+                "stored_name": stored_name,
+                "size": size,
+                "content_type": content_type,
+                "uploaded_by": uploaded_by,
+                "created_at": datetime.now().isoformat(),
+            }
+            data.setdefault("attachments", []).append(att)
+            self._atomic_write(data)
+            return att
+
+    def delete_attachment(self, att_id: int) -> Optional[Dict[str, Any]]:
+        with _lock:
+            data = self._read_data()
+            atts = data.get("attachments", [])
+            for i, a in enumerate(atts):
+                if a["id"] == att_id:
+                    atts.pop(i)
+                    self._atomic_write(data)
+                    return a
+            return None
+
+
+ATTACHMENTS_DIR = os.path.join(os.path.dirname(DB_FILE_PATH), "klukva_attachments")
 
 db = JSONDatabase()
