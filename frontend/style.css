@@ -2315,3 +2315,21 @@ textarea.form-control {
     min-width: 620px;
   }
 }
+/* ---------- Task links ---------- */
+.links-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.links-header .jira-section-label { margin: 0; }
+.link-add-form { display: flex; gap: 8px; align-items: flex-start; margin-bottom: 10px; }
+.link-add-form select { width: 170px; flex: none; }
+.link-search-wrap { position: relative; flex: 1; }
+.link-search-results { position: absolute; top: 100%; left: 0; right: 0; z-index: 50; background: var(--bg-surface, #fff); border: 1px solid var(--border-default); max-height: 240px; overflow-y: auto; }
+.link-search-results:empty { display: none; }
+.link-search-item { padding: 6px 10px; cursor: pointer; font-size: 13px; }
+.link-search-item:hover { background: var(--accent-subtle); }
+.link-group-label { font-size: 11px; color: var(--text-dim); text-transform: uppercase; margin: 8px 0 4px; }
+.link-row { display: flex; align-items: center; gap: 8px; padding: 4px 6px; border: 1px solid var(--border-subtle); margin-bottom: 4px; font-size: 13px; }
+.link-row .link-title { flex: 1; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.link-row .link-remove { background: none; border: none; cursor: pointer; color: var(--text-dim); font-size: 14px; }
+.link-row .link-remove:hover { color: var(--accent); }
+.links-empty { color: var(--text-dim); font-size: 13px; }
+.link-indicator { display: inline-block; margin-left: 6px; font-size: 11px; color: var(--text-dim); border: 1px solid var(--border-default); padding: 0 4px; border-radius: 3px; vertical-align: middle; }
+.blocked-indicator { display: inline-block; margin-left: 6px; font-size: 11px; color: var(--accent); border: 1px solid var(--accent-border); background: var(--accent-subtle); padding: 0 4px; border-radius: 3px; vertical-align: middle; }

@@ -51,6 +51,15 @@ VALID_STATUSES = [
     "Реализовано частично"
 ]
 
+FINAL_STATUSES = {"Завершено", "Не реализовано", "Реализовано частично"}
+
+# type -> (label for source, label for target)
+LINK_LABELS = {
+    "relates": ("Связана с", "Связана с"),
+    "blocks": ("Блокирует", "Заблокирована"),
+    "parent": ("Родитель для", "Подзадача"),
+}
+
 
 class JSONDatabase:
     def __init__(self, file_path: str = DB_FILE_PATH):
@@ -182,6 +191,8 @@ class JSONDatabase:
 
             # Sort by order ascending, then by id descending
             result.sort(key=lambda x: (x.get("order", 0.0), -x["id"]))
+            self._ensure_links(data)
+            self._enrich_tasks(data, result)
             return result
 
     def get_task_by_id(self, task_id: int) -> Optional[Dict[str, Any]]:
@@ -189,6 +200,8 @@ class JSONDatabase:
             data = self._read_data()
             for t in data.get("tasks", []):
                 if t["id"] == task_id:
+                    self._ensure_links(data)
+                    self._enrich_tasks(data, [t])
                     return t
             return None
 
@@ -230,6 +243,17 @@ class JSONDatabase:
                 "parent_task_id": parent_task_id
             }
             data["tasks"].append(new_task)
+            self._ensure_links(data)
+            if parent_task_id and any(t["id"] == parent_task_id for t in data["tasks"]):
+                data["counters"]["link_id"] = data["counters"].get("link_id", 0) + 1
+                data["links"].append({
+                    "id": data["counters"]["link_id"],
+                    "type": "parent",
+                    "source_id": parent_task_id,
+                    "target_id": task_id,
+                    "created_by": created_by,
+                    "created_at": now
+                })
             self._atomic_write(data)
             return new_task
 
@@ -481,6 +505,142 @@ class JSONDatabase:
                 "moved_count": moved_count,
                 "backlog_count": 0
             }
+
+    # ------------------ LINKS ------------------
+    @staticmethod
+    def _ensure_links(data: Dict[str, Any]) -> bool:
+        """Create links collection and migrate legacy parent_task_id. Returns True if changed."""
+        if "links" in data:
+            return False
+        data["links"] = []
+        data.setdefault("counters", {})["link_id"] = 0
+        task_ids = {t["id"] for t in data.get("tasks", [])}
+        for t in sorted(data.get("tasks", []), key=lambda x: x["id"]):
+            pid = t.get("parent_task_id")
+            if pid and pid in task_ids and pid != t["id"]:
+                data["counters"]["link_id"] += 1
+                data["links"].append({
+                    "id": data["counters"]["link_id"],
+                    "type": "parent",
+                    "source_id": pid,
+                    "target_id": t["id"],
+                    "created_by": t.get("created_by", ""),
+                    "created_at": t.get("created_at")
+                })
+        return True
+
+    @staticmethod
+    def _enrich_tasks(data: Dict[str, Any], tasks: List[Dict[str, Any]]) -> None:
+        by_id = {t["id"]: t for t in data.get("tasks", [])}
+        links = data.get("links", [])
+        for t in tasks:
+            tid = t["id"]
+            count = 0
+            blocked = False
+            for l in links:
+                if l["source_id"] == tid or l["target_id"] == tid:
+                    count += 1
+                if l["type"] == "blocks" and l["target_id"] == tid:
+                    blocker = by_id.get(l["source_id"])
+                    if blocker and blocker.get("status") not in FINAL_STATUSES:
+                        blocked = True
+            t["links_count"] = count
+            t["is_blocked"] = blocked
+
+    @staticmethod
+    def _reachable(links: List[Dict[str, Any]], link_type: str, start: int, goal: int) -> bool:
+        stack, seen = [start], set()
+        while stack:
+            cur = stack.pop()
+            if cur == goal:
+                return True
+            if cur in seen:
+                continue
+            seen.add(cur)
+            stack.extend(l["target_id"] for l in links if l["type"] == link_type and l["source_id"] == cur)
+        return False
+
+    def get_links(self, task_id: int) -> List[Dict[str, Any]]:
+        with _lock:
+            data = self._read_data()
+            self._ensure_links(data)
+            by_id = {t["id"]: t for t in data.get("tasks", [])}
+            result = []
+            for l in data["links"]:
+                if task_id not in (l["source_id"], l["target_id"]):
+                    continue
+                outgoing = l["source_id"] == task_id
+                other = by_id.get(l["target_id"] if outgoing else l["source_id"])
+                if not other:
+                    continue
+                result.append({
+                    **l,
+                    "direction": "outward" if outgoing else "inward",
+                    "label": LINK_LABELS[l["type"]][0 if outgoing else 1],
+                    "other_task": {
+                        "id": other["id"], "key": other["key"], "title": other["title"],
+                        "status": other.get("status"), "assignee": other.get("assignee")
+                    }
+                })
+            return result
+
+    def create_link(self, link_type: str, source_id: int, target_id: int, created_by: str) -> Dict[str, Any]:
+        if link_type not in LINK_LABELS:
+            raise ValueError("Неизвестный тип связи")
+        if source_id == target_id:
+            raise ValueError("Нельзя связать задачу саму с собой")
+        with _lock:
+            data = self._read_data()
+            self._ensure_links(data)
+            ids = {t["id"] for t in data.get("tasks", [])}
+            if source_id not in ids or target_id not in ids:
+                raise LookupError("Задача не найдена")
+            links = data["links"]
+            pair = {source_id, target_id}
+            for l in links:
+                same_pair = {l["source_id"], l["target_id"]} == pair
+                if same_pair and l["type"] == link_type and (
+                    link_type == "relates" or l["source_id"] == source_id
+                ):
+                    raise ValueError("Такая связь уже существует")
+                if same_pair and l["type"] == link_type:
+                    raise ValueError("Обратная связь уже существует (цикл)")
+            if link_type == "parent":
+                if any(l["type"] == "parent" and l["target_id"] == target_id for l in links):
+                    raise ValueError("У задачи уже есть родитель")
+            if link_type in ("parent", "blocks") and self._reachable(links, link_type, target_id, source_id):
+                raise ValueError("Связь создаст цикл")
+            data["counters"]["link_id"] = data["counters"].get("link_id", 0) + 1
+            link = {
+                "id": data["counters"]["link_id"],
+                "type": link_type,
+                "source_id": source_id,
+                "target_id": target_id,
+                "created_by": created_by,
+                "created_at": datetime.utcnow().isoformat() + "Z"
+            }
+            links.append(link)
+            if link_type == "parent":
+                for t in data["tasks"]:
+                    if t["id"] == target_id:
+                        t["parent_task_id"] = source_id
+            self._atomic_write(data)
+            return link
+
+    def delete_link(self, link_id: int) -> Optional[Dict[str, Any]]:
+        with _lock:
+            data = self._read_data()
+            self._ensure_links(data)
+            for i, l in enumerate(data["links"]):
+                if l["id"] == link_id:
+                    data["links"].pop(i)
+                    if l["type"] == "parent":
+                        for t in data["tasks"]:
+                            if t["id"] == l["target_id"] and t.get("parent_task_id") == l["source_id"]:
+                                t["parent_task_id"] = None
+                    self._atomic_write(data)
+                    return l
+            return None
 
 
 db = JSONDatabase()

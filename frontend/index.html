@@ -360,6 +360,29 @@
           </div>
         </div>
 
+        <!-- Links Section -->
+        <div class="jira-section links-section">
+          <div class="links-header">
+            <label class="jira-section-label">Связи</label>
+            <button type="button" class="btn btn-secondary btn-sm" id="btnAddLink">+ Связь</button>
+          </div>
+          <div class="link-add-form" id="linkAddForm" style="display: none;">
+            <select id="linkTypeSelect" class="form-control">
+              <option value="relates:outward">Связана с</option>
+              <option value="blocks:outward">Блокирует</option>
+              <option value="blocks:inward">Заблокирована</option>
+              <option value="parent:outward">Родитель для</option>
+              <option value="parent:inward">Подзадача</option>
+            </select>
+            <div class="link-search-wrap">
+              <input type="text" id="linkSearchInput" class="form-control" placeholder="Ключ или название задачи..." autocomplete="off">
+              <div class="link-search-results" id="linkSearchResults"></div>
+            </div>
+            <button type="button" class="btn btn-secondary btn-sm" id="btnCancelLink">Отмена</button>
+          </div>
+          <div class="links-list" id="linksList"></div>
+        </div>
+
         <!-- Comments Section -->
         <div class="jira-section comments-section">
           <label class="jira-section-label">Комментарии и обсуждение</label>

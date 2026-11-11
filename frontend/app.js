@@ -499,6 +499,7 @@ function renderPureBacklog() {
     const tdTitle = document.createElement("td");
     tdTitle.className = "task-title-cell";
     tdTitle.textContent = t.title;
+    tdTitle.insertAdjacentHTML("beforeend", renderLinkIndicators(t));
     tdTitle.onclick = () => openTaskDetail(t.id);
     tr.appendChild(tdTitle);
 
@@ -642,6 +643,7 @@ function createDraggableTaskRow(task, inSprint) {
   const tdTitle = document.createElement("td");
   tdTitle.className = "task-title-cell";
   tdTitle.textContent = task.title;
+  tdTitle.insertAdjacentHTML("beforeend", renderLinkIndicators(task));
   tdTitle.onclick = () => openTaskDetail(task.id);
   tr.appendChild(tdTitle);
 
@@ -1016,7 +1018,7 @@ function createScrumCard(task) {
       <span class="task-key-link" onclick="openTaskDetail(${task.id})">${task.key}</span>
       ${task.story_points ? `<span class="sp-badge">${task.story_points} SP</span>` : ""}
     </div>
-    <div class="scrum-card-title" onclick="openTaskDetail(${task.id})">${escapeHtml(task.title)}</div>
+    <div class="scrum-card-title" onclick="openTaskDetail(${task.id})">${escapeHtml(task.title)}${renderLinkIndicators(task)}</div>
     <div class="scrum-card-bottom">
       <div>${renderStatusBadge(task.status)}</div>
       ${task.assignee ? `<span class="scrum-card-avatar" title="${escapeHtml(task.assignee)}">${task.assignee.charAt(0).toUpperCase()}</span>` : ""}
@@ -1138,12 +1140,135 @@ async function openTaskDetail(taskId) {
 
     updatePartialSplitBoxVisibility();
     renderComments(task.comments || []);
+    resetLinkForm();
+    loadLinks(taskId);
 
     document.getElementById("fullpageTaskDetail").style.display = "flex";
     window.history.pushState({ page: "task", id: taskId }, "", `/task/${taskId}`);
   } catch (err) {
     showToast(`Ошибка: ${err.message}`);
   }
+}
+
+// ---------------- СВЯЗИ ЗАДАЧ ----------------
+function renderLinkIndicators(task) {
+  let html = "";
+  if (task.is_blocked) html += '<span class="blocked-indicator" title="Есть незавершённый блокер">Заблокирована</span>';
+  if (task.links_count) html += `<span class="link-indicator" title="Связей: ${task.links_count}">&#128279; ${task.links_count}</span>`;
+  return html;
+}
+
+const LINK_GROUP_ORDER = ["Заблокирована", "Блокирует", "Родитель для", "Подзадача", "Связана с"];
+
+async function loadLinks(taskId) {
+  const container = document.getElementById("linksList");
+  try {
+    const links = await api(`/api/tasks/${taskId}/links`);
+    if (!state.currentTaskDetail || state.currentTaskDetail.id !== taskId) return;
+    state.currentTaskDetail.links = links;
+    if (!links.length) {
+      container.innerHTML = '<div class="links-empty">Связей нет</div>';
+      return;
+    }
+    container.innerHTML = "";
+    LINK_GROUP_ORDER.forEach(label => {
+      const group = links.filter(l => l.label === label);
+      if (!group.length) return;
+      const lbl = document.createElement("div");
+      lbl.className = "link-group-label";
+      lbl.textContent = label;
+      container.appendChild(lbl);
+      group.forEach(l => {
+        const row = document.createElement("div");
+        row.className = "link-row";
+        const o = l.other_task;
+        row.innerHTML = `
+          <span class="task-key-link">${escapeHtml(o.key)}</span>
+          <span class="link-title">${escapeHtml(o.title)}</span>
+          ${renderStatusBadge(o.status)}
+          <button type="button" class="link-remove" title="Удалить связь">&#10005;</button>`;
+        row.querySelector(".task-key-link").onclick = () => openTaskDetail(o.id);
+        row.querySelector(".link-title").onclick = () => openTaskDetail(o.id);
+        row.querySelector(".link-remove").onclick = () => removeLink(l.id);
+        container.appendChild(row);
+      });
+    });
+  } catch (err) {
+    container.innerHTML = `<div class="links-empty">Ошибка: ${escapeHtml(err.message)}</div>`;
+  }
+}
+
+function resetLinkForm() {
+  document.getElementById("linkAddForm").style.display = "none";
+  document.getElementById("linkSearchInput").value = "";
+  document.getElementById("linkSearchResults").innerHTML = "";
+}
+
+async function searchLinkTargets() {
+  const q = document.getElementById("linkSearchInput").value.trim();
+  const box = document.getElementById("linkSearchResults");
+  if (!q || !state.currentTaskDetail) { box.innerHTML = ""; return; }
+  try {
+    const tasks = await api(`/api/tasks?search=${encodeURIComponent(q)}`);
+    const curId = state.currentTaskDetail.id;
+    box.innerHTML = "";
+    tasks.filter(t => t.id !== curId).slice(0, 15).forEach(t => {
+      const item = document.createElement("div");
+      item.className = "link-search-item";
+      item.innerHTML = `<b>${escapeHtml(t.key)}</b> ${escapeHtml(t.title)}`;
+      item.onclick = () => addLink(t.id);
+      box.appendChild(item);
+    });
+    if (!box.children.length) box.innerHTML = '<div class="link-search-item links-empty">Ничего не найдено</div>';
+  } catch (err) {
+    box.innerHTML = "";
+  }
+}
+
+async function addLink(targetId) {
+  const taskId = state.currentTaskDetail.id;
+  const [type, direction] = document.getElementById("linkTypeSelect").value.split(":");
+  try {
+    await api(`/api/tasks/${taskId}/links`, {
+      method: "POST",
+      body: JSON.stringify({ type, target_id: targetId, direction })
+    });
+    showToast("Связь добавлена");
+    resetLinkForm();
+    await refreshAfterLinkChange(taskId);
+  } catch (err) {
+    showToast(`Ошибка: ${err.message}`);
+  }
+}
+
+async function removeLink(linkId) {
+  const taskId = state.currentTaskDetail.id;
+  if (!confirm("Удалить связь?")) return;
+  try {
+    await api(`/api/tasks/${taskId}/links/${linkId}`, { method: "DELETE" });
+    showToast("Связь удалена");
+    await refreshAfterLinkChange(taskId);
+  } catch (err) {
+    showToast(`Ошибка: ${err.message}`);
+  }
+}
+
+async function refreshAfterLinkChange(taskId) {
+  await loadLinks(taskId);
+  const comments = await api(`/api/tasks/${taskId}/comments`);
+  state.currentTaskDetail.comments = comments;
+  renderComments(comments);
+  loadTasks();
+}
+
+function setupLinkListeners() {
+  document.getElementById("btnAddLink").addEventListener("click", () => {
+    const form = document.getElementById("linkAddForm");
+    form.style.display = form.style.display === "none" ? "flex" : "none";
+    if (form.style.display === "flex") document.getElementById("linkSearchInput").focus();
+  });
+  document.getElementById("btnCancelLink").addEventListener("click", resetLinkForm);
+  document.getElementById("linkSearchInput").addEventListener("input", debounce(searchLinkTargets, 250));
 }
 
 function closeTaskDetail() {
@@ -1447,6 +1572,7 @@ function handleLogout() {
 
 // ---------------- ОБРАБОТЧИКИ СОБЫТИЙ ----------------
 function setupEventListeners() {
+  setupLinkListeners();
   // Навигация по вкладкам
   document.getElementById("tabBacklog").addEventListener("click", () => switchTab("backlog"));
   document.getElementById("tabSprints").addEventListener("click", () => switchTab("sprints"));

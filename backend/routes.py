@@ -414,6 +414,71 @@ def delete_comment(
 
 
 # ============================================================================
+# TASK LINKS
+# ============================================================================
+class LinkCreateRequest(BaseModel):
+    type: str
+    target_id: int
+    # "outward": current task is the source (blocks / parent of target)
+    # "inward": current task is the target (blocked by / subtask of target)
+    direction: str = "outward"
+
+
+def _link_comment(task_id: int, other_id: int, label: str, removed: bool, user: str) -> None:
+    other = db.get_task_by_id(other_id)
+    if not other:
+        return
+    action = "удалил связь" if removed else "добавил связь"
+    db.add_comment(
+        task_id=task_id,
+        author="Klukva",
+        text=f"{user} {action}: {label} {other['key']} - {other['title']}",
+        mentions=[]
+    )
+
+
+def _labels(link: Dict) -> tuple:
+    from backend.db import LINK_LABELS
+    return LINK_LABELS[link["type"]]
+
+
+@router.get("/tasks/{task_id}/links")
+def list_links(task_id: int, current_user: Dict = Depends(get_current_user)):
+    if not db.get_task_by_id(task_id):
+        raise HTTPException(status_code=404, detail="Задача не найдена")
+    return db.get_links(task_id)
+
+
+@router.post("/tasks/{task_id}/links", status_code=201)
+def create_link(task_id: int, req: LinkCreateRequest, current_user: Dict = Depends(get_current_user)):
+    if req.direction not in ("outward", "inward"):
+        raise HTTPException(status_code=400, detail="Неверное направление связи")
+    src, dst = (task_id, req.target_id) if req.direction == "outward" else (req.target_id, task_id)
+    try:
+        link = db.create_link(req.type, src, dst, current_user["username"])
+    except LookupError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    out_label, in_label = _labels(link)
+    _link_comment(src, dst, out_label, False, current_user["username"])
+    _link_comment(dst, src, in_label, False, current_user["username"])
+    return link
+
+
+@router.delete("/tasks/{task_id}/links/{link_id}")
+def delete_link(task_id: int, link_id: int, current_user: Dict = Depends(get_current_user)):
+    existing = [l for l in db.get_links(task_id) if l["id"] == link_id]
+    if not existing:
+        raise HTTPException(status_code=404, detail="Связь не найдена")
+    link = db.delete_link(link_id)
+    out_label, in_label = _labels(link)
+    _link_comment(link["source_id"], link["target_id"], out_label, True, current_user["username"])
+    _link_comment(link["target_id"], link["source_id"], in_label, True, current_user["username"])
+    return {"ok": True}
+
+
+# ============================================================================
 # SYSTEM / UPDATE
 # ============================================================================
 def find_repo_dir() -> str:
