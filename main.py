@@ -5,13 +5,16 @@ Serves both JSON REST API and Static Utilitarian Frontend.
 """
 
 import os
+from contextlib import asynccontextmanager
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from backend.db import db
 from backend.routes import router as api_router
+from backend.mcp import mcp_router
 
 import sys
 
@@ -36,12 +39,19 @@ def get_frontend_dir() -> str:
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 FRONTEND_DIR = get_frontend_dir()
 
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    db.ensure_system_admin()
+    yield
+
+
 app = FastAPI(
     title="Klukva",
     description="Ultra-lightweight utilitarian task tracker",
     version="1.0.0",
     docs_url="/api/docs",
-    redoc_url=None
+    redoc_url=None,
+    lifespan=lifespan,
 )
 
 # CORS configuration
@@ -55,6 +65,7 @@ app.add_middleware(
 
 # API routes
 app.include_router(api_router)
+app.include_router(mcp_router)
 
 
 # Static assets

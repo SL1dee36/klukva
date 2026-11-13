@@ -52,9 +52,18 @@ def wait_for_server(port: int, max_retries: int = 50) -> bool:
     return False
 
 
+def get_webview_storage_dir() -> str:
+    """Return a persistent directory for WebView2 storage (localStorage, cookies, cache)."""
+    base_dir = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")
+    storage_dir = os.path.join(base_dir, "Klukva", "webview_storage")
+    os.makedirs(storage_dir, exist_ok=True)
+    return storage_dir
+
+
 def main():
     port = find_open_port(3002)
     os.environ["KLUKVA_PORT"] = str(port)
+    storage_dir = get_webview_storage_dir()
 
     # Start FastAPI server in a background daemon thread
     server_thread = threading.Thread(target=run_server, args=(port,), daemon=True)
@@ -75,7 +84,11 @@ def main():
             text_select=True,
             confirm_close=False
         )
-        webview.start(debug=False)
+        webview.start(
+            debug=False,
+            private_mode=False,
+            storage_path=storage_dir,
+        )
     except Exception as e:
         print(f"WebView2 initialization fallback: {e}")
         webbrowser.open(url)

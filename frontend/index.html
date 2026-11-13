@@ -23,6 +23,8 @@
           <button class="tab-btn active" id="tabBacklog" data-tab="backlog">Бэклог</button>
           <button class="tab-btn" id="tabSprints" data-tab="sprints">Спринты</button>
           <button class="tab-btn" id="tabBoard" data-tab="board">Scam-доска</button>
+          <button class="tab-btn" id="tabAnalytics" data-tab="analytics">Аналитика</button>
+          <button class="tab-btn" id="navTabSystem" data-tab="system" style="display: none;">Система</button>
         </nav>
       </div>
 
@@ -35,9 +37,25 @@
           <span class="btn-text-full">+ Создать задачу</span>
           <span class="btn-text-short">+ Задача</span>
         </button>
+        <div class="notif-wrapper" id="notifWrapper" style="display: none;">
+          <button type="button" class="btn btn-secondary btn-sm notif-btn" id="btnNotifications" title="Уведомления">
+            <span>Уведомления</span>
+            <span class="notif-badge" id="notifBadge" style="display: none;">0</span>
+          </button>
+          <div class="notif-dropdown" id="notifDropdown" style="display: none;">
+            <div class="notif-dropdown-header">
+              <span>Уведомления</span>
+              <button type="button" class="btn-link-sm" id="btnMarkAllRead">Прочитать все</button>
+            </div>
+            <div class="notif-dropdown-list" id="notifList"></div>
+          </div>
+        </div>
         <div class="user-profile" id="userProfile" style="display: none;">
-          <span class="user-avatar" id="userAvatar">U</span>
-          <span class="user-label" id="userDisplayName"></span>
+          <button type="button" class="user-profile-trigger" id="btnOpenOwnProfile" title="Личный кабинет">
+            <span class="user-avatar" id="userAvatar">U</span>
+            <span class="user-label" id="userDisplayName"></span>
+            <span class="role-badge" id="userRoleBadge"></span>
+          </button>
           <button class="btn btn-ghost btn-sm" id="btnLogout" title="Выйти из системы">Выйти</button>
         </div>
       </div>
@@ -87,6 +105,28 @@
               <select id="filterAssignee" class="form-control select-sm">
                 <option value="">Все исполнители</option>
                 <option value="unassigned">Не назначен</option>
+              </select>
+            </div>
+
+            <div class="filter-item">
+              <label for="filterTaskType">Тип</label>
+              <select id="filterTaskType" class="form-control select-sm">
+                <option value="">Все типы</option>
+                <option value="Задача">Задача</option>
+                <option value="Нововведение">Нововведение</option>
+                <option value="Ошибка">Ошибка</option>
+                <option value="Тестирование">Тестирование</option>
+                <option value="Ревью">Ревью</option>
+                <option value="Исследование">Исследование</option>
+                <option value="Эпик">Эпик</option>
+                <option value="Сириус">Сириус</option>
+              </select>
+            </div>
+
+            <div class="filter-item">
+              <label for="filterCluster">Эпик / Сириус</label>
+              <select id="filterCluster" class="form-control select-sm">
+                <option value="">Все эпики и сириусы</option>
               </select>
             </div>
 
@@ -284,6 +324,84 @@
         </div>
       </section>
 
+      <!-- ================================================================
+           4. ANALYTICS / CHARTS VIEW
+           ================================================================ -->
+      <section class="view-section" id="viewAnalytics">
+        <div class="toolbar">
+          <div class="sprint-view-controls">
+            <span class="panel-title">Аналитика и графики</span>
+          </div>
+          <div class="header-actions">
+            <button type="button" class="btn btn-secondary btn-sm" id="btnRefreshAnalytics">Обновить данные</button>
+          </div>
+        </div>
+        <div class="analytics-container p-16" id="analyticsContainer">
+          <div class="analytics-kpi-grid" id="analyticsKpiGrid"></div>
+          <div class="analytics-charts-grid" id="analyticsChartsGrid"></div>
+        </div>
+      </section>
+
+      <!-- ================================================================
+           5. SYSTEM ADMIN PANEL (ONLY FOR is_system USER)
+           ================================================================ -->
+      <section class="view-section" id="viewSystem">
+        <div class="toolbar">
+          <div class="sprint-view-controls">
+            <span class="panel-title">Системное администрирование</span>
+            <div class="profile-subtabs" style="margin: 0;">
+              <button type="button" class="profile-subtab active" data-systab="audit">Журнал изменений</button>
+              <button type="button" class="profile-subtab" data-systab="files">Все файлы</button>
+              <button type="button" class="profile-subtab" data-systab="users">Пользователи и доступ</button>
+            </div>
+          </div>
+          <div class="header-actions">
+            <button type="button" class="btn btn-secondary btn-sm" id="btnSysExportDb">Скачать БД (JSON)</button>
+            <button type="button" class="btn btn-secondary btn-sm" id="btnSysRefresh">Обновить</button>
+          </div>
+        </div>
+
+        <div class="system-container p-16">
+          <!-- Sub-view 1: Global Audit Log -->
+          <div class="system-panel active" id="sysPanelAudit">
+            <div class="analytics-kpi-grid" id="sysAuditSummary"></div>
+            <div class="sys-filters-bar">
+              <select id="sysAuditUser" class="form-control select-sm" style="max-width: 200px;">
+                <option value="">Все пользователи</option>
+              </select>
+              <select id="sysAuditAction" class="form-control select-sm" style="max-width: 220px;">
+                <option value="">Все типы событий</option>
+              </select>
+              <input type="text" id="sysAuditSearch" class="form-control input-sm" placeholder="Поиск по ключу, тексту, пользователю..." style="max-width: 300px;">
+            </div>
+            <div class="panel-box">
+              <div class="activity-feed" id="sysAuditFeed"></div>
+            </div>
+          </div>
+
+          <!-- Sub-view 2: All Files (Attachments & Avatars) -->
+          <div class="system-panel" id="sysPanelFiles">
+            <div class="analytics-kpi-grid" id="sysFilesSummary"></div>
+            <div class="panel-box p-16" style="margin-bottom: 16px;">
+              <h3 class="profile-card-title">Файлы задач (вложения)</h3>
+              <div id="sysAttachmentsWrap"></div>
+            </div>
+            <div class="panel-box p-16">
+              <h3 class="profile-card-title">Аватары пользователей</h3>
+              <div id="sysAvatarsWrap"></div>
+            </div>
+          </div>
+
+          <!-- Sub-view 3: All Users & Security Controls -->
+          <div class="system-panel" id="sysPanelUsers">
+            <div class="panel-box p-16">
+              <h3 class="profile-card-title">Учётные записи и права доступа</h3>
+              <div id="sysUsersWrap"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
     </main>
   </div>
 
@@ -298,6 +416,8 @@
         </button>
         <span class="breadcrumb-separator">/</span>
         <span class="task-key-badge" id="detailTaskKey">KLUK-0</span>
+        <span id="detailTypeBadgeSlot"></span>
+        <span id="detailClusterBadgeSlot"></span>
         <span id="detailStatusBadgeSlot"></span>
       </div>
       <div class="fullpage-header-right">
@@ -358,6 +478,27 @@
               </div>
             </div>
           </div>
+        </div>
+
+        <!-- Hierarchy Children Section (for Эпик & Сириус containers) -->
+        <div class="jira-section hierarchy-section" id="hierarchyChildrenSection" style="display: none;">
+          <div class="links-header">
+            <div>
+              <label class="jira-section-label" id="hierarchyChildrenTitle" style="margin: 0;">Вложенные задачи</label>
+              <span class="hierarchy-summary" id="hierarchyChildrenSummary"></span>
+            </div>
+            <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+              <button type="button" class="btn btn-secondary btn-sm" id="btnAttachChildOpen">+ Добавить существующую</button>
+              <button type="button" class="btn btn-primary btn-sm" id="btnCreateChildInContainer">+ Создать внутрь</button>
+            </div>
+          </div>
+          <div class="hierarchy-progress-track"><div class="hierarchy-progress-fill" id="hierarchyProgressBar" style="width: 0%;"></div></div>
+          <div class="link-add-form" id="hierarchyAttachForm" style="display: none; margin-top: 10px;">
+            <select id="hierarchyAttachSelect" class="form-control"></select>
+            <button type="button" class="btn btn-primary btn-sm" id="btnConfirmAttachChild">Добавить</button>
+            <button type="button" class="btn btn-secondary btn-sm" id="btnCancelAttachChild">Отмена</button>
+          </div>
+          <div class="hierarchy-children-list" id="hierarchyChildrenList"></div>
         </div>
 
         <!-- Links Section -->
@@ -427,6 +568,40 @@
                 <option value="Завершено">Завершено</option>
                 <option value="Не реализовано">Не реализовано</option>
                 <option value="Реализовано частично">Реализовано частично</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="meta-field">
+            <label class="meta-label" for="detailTaskType">Тип задачи</label>
+            <div class="meta-value">
+              <select id="detailTaskType" class="form-control select-sm">
+                <option value="Задача">Задача</option>
+                <option value="Нововведение">Нововведение</option>
+                <option value="Ошибка">Ошибка</option>
+                <option value="Тестирование">Тестирование</option>
+                <option value="Ревью">Ревью</option>
+                <option value="Исследование">Исследование</option>
+                <option value="Эпик">Эпик</option>
+                <option value="Сириус">Сириус</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="meta-field" id="detailEpicField">
+            <label class="meta-label" for="detailEpicId">Эпик</label>
+            <div class="meta-value">
+              <select id="detailEpicId" class="form-control select-sm">
+                <option value="">Без эпика</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="meta-field" id="detailSiriusField">
+            <label class="meta-label" for="detailSiriusId">Сириус</label>
+            <div class="meta-value">
+              <select id="detailSiriusId" class="form-control select-sm">
+                <option value="">Без Сириуса</option>
               </select>
             </div>
           </div>
@@ -512,6 +687,36 @@
           <label for="createDescription">Описание</label>
           <textarea id="createDescription" class="form-control" rows="8"
             placeholder="Технические требования, подробности, критерии приемки..."></textarea>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group flex-1">
+            <label for="createTaskType">Тип задачи</label>
+            <select id="createTaskType" class="form-control">
+              <option value="Задача">Задача (KLUK)</option>
+              <option value="Нововведение">Нововведение</option>
+              <option value="Ошибка">Ошибка</option>
+              <option value="Тестирование">Тестирование</option>
+              <option value="Ревью">Ревью</option>
+              <option value="Исследование">Исследование</option>
+              <option value="Эпик">Эпик (группа задач)</option>
+              <option value="Сириус">Сириус (группа эпиков)</option>
+            </select>
+          </div>
+
+          <div class="form-group flex-1" id="createEpicGroup">
+            <label for="createEpicId">Входит в Эпик</label>
+            <select id="createEpicId" class="form-control">
+              <option value="">Без эпика</option>
+            </select>
+          </div>
+
+          <div class="form-group flex-1" id="createSiriusGroup" style="display: none;">
+            <label for="createSiriusId">Входит в Сириус</label>
+            <select id="createSiriusId" class="form-control">
+              <option value="">Без Сириуса</option>
+            </select>
+          </div>
         </div>
 
         <div class="form-row">
@@ -629,10 +834,247 @@
             autocomplete="current-password">
         </div>
 
+        <label class="auth-checkbox-row" id="groupTrustDevice">
+          <input type="checkbox" id="authTrustDevice" checked>
+          <span>Доверенное устройство (сохранить вход на 90 дней)</span>
+        </label>
+
         <div class="auth-error" id="authErrorMsg" style="display: none;"></div>
 
         <button type="submit" class="btn btn-primary btn-block btn-lg" id="btnAuthSubmit">Войти</button>
       </form>
+
+      <form id="formAuthTotp" style="display: none;">
+        <div class="form-group">
+          <label for="authTotpCode">Код двухфакторной аутентификации (TOTP)</label>
+          <input type="text" id="authTotpCode" class="form-control form-control-lg" placeholder="000000"
+            maxlength="6" inputmode="numeric" autocomplete="one-time-code" required>
+          <span class="field-hint">Введите 6-значный код из приложения-аутентификатора</span>
+        </div>
+        <div class="auth-error" id="authTotpErrorMsg" style="display: none;"></div>
+        <button type="submit" class="btn btn-primary btn-block btn-lg">Подтвердить вход</button>
+        <button type="button" class="btn btn-secondary btn-block" id="btnBackToPassword" style="margin-top: 8px;">Назад</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- =========================================================================
+       FULL-PAGE VIEW: USER PROFILE / PERSONAL CABINET
+       ========================================================================= -->
+  <div class="fullpage-view" id="fullpageProfile" style="display: none;">
+    <div class="fullpage-header">
+      <div class="fullpage-header-left">
+        <button class="btn btn-ghost btn-back" id="btnBackFromProfile">
+          <span class="back-arrow">&larr;</span> Назад
+        </button>
+        <span class="breadcrumb-separator">/</span>
+        <span class="fullpage-title" id="profilePageTitle">Личный кабинет</span>
+      </div>
+      <div class="fullpage-header-right">
+        <label for="profileUserSelect" class="meta-label" style="margin: 0; font-size: 12px;">Профиль:</label>
+        <select id="profileUserSelect" class="form-control select-sm" style="width: 220px;"></select>
+      </div>
+    </div>
+
+    <div class="fullpage-body profile-layout">
+      <!-- Profile Summary Card -->
+      <div class="profile-summary-card">
+        <div class="profile-avatar-block">
+          <div class="profile-avatar-lg" id="profAvatarLg">U</div>
+          <div class="profile-avatar-actions" id="profAvatarActions">
+            <input type="file" id="avatarFileInput" accept="image/*" style="display: none;">
+            <button type="button" class="btn btn-secondary btn-sm" id="btnUploadAvatar">Загрузить фото</button>
+            <button type="button" class="btn btn-ghost btn-sm" id="btnRemoveAvatar" style="display: none;">Удалить</button>
+          </div>
+        </div>
+        <div class="profile-identity">
+          <div class="profile-name-row">
+            <h2 id="profDisplayName">—</h2>
+            <span class="role-badge" id="profRoleBadge">member</span>
+          </div>
+          <div class="profile-username" id="profUsername">@user</div>
+          <div class="profile-meta-grid">
+            <div class="profile-meta-item">
+              <span class="profile-meta-label">Последний вход</span>
+              <span class="profile-meta-val" id="profLastLogin">—</span>
+            </div>
+            <div class="profile-meta-item">
+              <span class="profile-meta-label">Всего входов</span>
+              <span class="profile-meta-val" id="profLoginCount">0</span>
+            </div>
+            <div class="profile-meta-item">
+              <span class="profile-meta-label">В системе с</span>
+              <span class="profile-meta-val" id="profCreatedAt">—</span>
+            </div>
+            <div class="profile-meta-item" id="profTotpStatusItem">
+              <span class="profile-meta-label">2FA (TOTP)</span>
+              <span class="profile-meta-val" id="profTotpStatus">Выключена</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Profile Sub-tabs -->
+      <div class="profile-subtabs" id="profileSubtabs">
+        <button type="button" class="profile-subtab active" data-proftab="activity" id="profBtnTabActivity">Лента активности</button>
+        <button type="button" class="profile-subtab" data-proftab="security" id="profBtnTabSecurity">Профиль и безопасность</button>
+        <button type="button" class="profile-subtab" data-proftab="tokens" id="profBtnTabTokens">API и MCP</button>
+        <button type="button" class="profile-subtab" data-proftab="roles" id="profBtnTabRoles" style="display: none;">Роли (Админ)</button>
+      </div>
+
+      <!-- Tab 1: Activity & Task Execution History -->
+      <div class="profile-tab-panel active" id="profPanelActivity">
+        <div class="profile-stats-strip" id="profActivityStats"></div>
+        <div class="panel-box">
+          <div class="panel-box-header">
+            <span class="panel-title">История выполнения задач и лента активности</span>
+          </div>
+          <div class="activity-feed" id="profActivityFeed"></div>
+        </div>
+      </div>
+
+      <!-- Tab 2: Security, Edit Name, Password, TOTP, Trusted Devices (OWN ONLY) -->
+      <div class="profile-tab-panel" id="profPanelSecurity">
+        <div class="forced-creds-card panel-box p-16" id="cardForcedCredentials" style="display: none; margin-bottom: 16px;">
+          <div class="forced-creds-banner" id="forcedCredsBanner">
+            Первый вход системного пользователя. Для продолжения работы с трекером необходимо принудительно изменить логин (отличный от <code>admin</code>) и пароль.
+          </div>
+          <form id="formChangeCredentials">
+            <div class="profile-grid-2">
+              <div class="form-group">
+                <label for="inputCredCurrentPw">Текущий пароль *</label>
+                <input type="password" id="inputCredCurrentPw" class="form-control" required placeholder="Текущий пароль (admin)">
+              </div>
+              <div class="form-group">
+                <label for="inputCredNewUsername">Новый логин *</label>
+                <input type="text" id="inputCredNewUsername" class="form-control" required minlength="2" maxlength="32" placeholder="Например: sysroot">
+              </div>
+            </div>
+            <div class="profile-grid-2">
+              <div class="form-group">
+                <label for="inputCredNewPassword">Новый пароль *</label>
+                <input type="password" id="inputCredNewPassword" class="form-control" required minlength="4" placeholder="Минимум 4 символа">
+              </div>
+              <div class="form-group">
+                <label for="inputCredConfirmPassword">Повторите новый пароль *</label>
+                <input type="password" id="inputCredConfirmPassword" class="form-control" required minlength="4" placeholder="Повтор нового пароля">
+              </div>
+            </div>
+            <div class="auth-error" id="credChangeError" style="display: none;"></div>
+            <button type="submit" class="btn btn-primary">Сохранить новый логин и пароль</button>
+          </form>
+        </div>
+
+        <div class="profile-grid-2" id="profStandardCards">
+          <div class="panel-box p-16">
+            <h3 class="profile-card-title">Редактировать ФИО</h3>
+            <form id="formProfileName">
+              <div class="form-group">
+                <label for="inputProfDisplayName">Полное имя (ФИО)</label>
+                <input type="text" id="inputProfDisplayName" class="form-control" required maxlength="80">
+              </div>
+              <button type="submit" class="btn btn-primary btn-sm">Сохранить ФИО</button>
+            </form>
+          </div>
+
+          <div class="panel-box p-16">
+            <h3 class="profile-card-title">Смена пароля</h3>
+            <form id="formProfilePassword">
+              <div class="form-group">
+                <label for="inputCurPassword">Текущий пароль</label>
+                <input type="password" id="inputCurPassword" class="form-control" required>
+              </div>
+              <div class="form-group">
+                <label for="inputNewPassword">Новый пароль</label>
+                <input type="password" id="inputNewPassword" class="form-control" required minlength="3">
+              </div>
+              <button type="submit" class="btn btn-primary btn-sm">Обновить пароль</button>
+            </form>
+          </div>
+        </div>
+
+        <div class="panel-box p-16" style="margin-top: 16px;">
+          <h3 class="profile-card-title">Двухфакторная аутентификация (TOTP)</h3>
+          <div id="totpDisabledBox">
+            <p class="profile-hint">Защитите аккаунт одноразовыми 6-значными кодами (Google Authenticator, Authy, 2FAS).</p>
+            <button type="button" class="btn btn-primary btn-sm" id="btnStartTotpSetup">Настроить TOTP</button>
+            <div id="totpSetupBox" style="display: none; margin-top: 12px;">
+              <div class="totp-setup-grid">
+                <div class="totp-qr-wrap" id="totpQrWrap"></div>
+                <div>
+                  <p class="profile-hint">Отсканируйте QR-код или введите ключ вручную:</p>
+                  <code class="totp-secret-code" id="totpSecretText"></code>
+                  <form id="formEnableTotp" style="margin-top: 10px;">
+                    <div class="form-group">
+                      <label for="inputEnableTotpCode">Код подтверждения (6 цифр)</label>
+                      <input type="text" id="inputEnableTotpCode" class="form-control" maxlength="6" placeholder="123456" required style="max-width: 180px;">
+                    </div>
+                    <button type="submit" class="btn btn-primary btn-sm">Включить TOTP</button>
+                  </form>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div id="totpEnabledBox" style="display: none;">
+            <p class="profile-hint">TOTP-аутентификация <b>активна</b>. При входе с новых устройств запрашивается 6-значный код.</p>
+            <form id="formDisableTotp" class="inline-form-row">
+              <input type="password" id="inputDisableTotpPw" class="form-control input-sm" placeholder="Пароль или код TOTP" required style="max-width: 240px;">
+              <button type="submit" class="btn btn-secondary btn-sm">Отключить TOTP</button>
+            </form>
+          </div>
+        </div>
+
+        <div class="panel-box p-16" style="margin-top: 16px;">
+          <div class="panel-box-header" style="padding: 0 0 10px 0; border-bottom: 1px solid var(--border-subtle); margin-bottom: 10px;">
+            <span class="profile-card-title" style="margin: 0;">Доверенные устройства</span>
+            <span class="profile-hint" style="margin: 0;">Отображаются только ваши устройства</span>
+          </div>
+          <div id="trustedDevicesList"></div>
+        </div>
+      </div>
+
+      <!-- Tab 3: Personal Access Tokens & MCP (OWN ONLY) -->
+      <div class="profile-tab-panel" id="profPanelTokens">
+        <div class="panel-box p-16">
+          <h3 class="profile-card-title">Персональные токены доступа (PAT)</h3>
+          <p class="profile-hint">Используются для авторизации в REST API и MCP-клиентах через заголовок <code>Authorization: Bearer &lt;token&gt;</code>.</p>
+          <form id="formCreatePat" class="inline-form-row" style="margin-bottom: 12px;">
+            <input type="text" id="inputPatName" class="form-control input-sm" placeholder="Название токена (например: Cursor MCP)" required style="max-width: 260px;">
+            <select id="inputPatDays" class="form-control select-sm" style="max-width: 160px;">
+              <option value="30">30 дней</option>
+              <option value="90" selected>90 дней</option>
+              <option value="365">1 год</option>
+            </select>
+            <button type="submit" class="btn btn-primary btn-sm">Сгенерировать токен</button>
+          </form>
+          <div id="newPatRevealBox" class="pat-reveal-box" style="display: none;">
+            <div>Скопируйте токен сейчас — повторно он не отобразится:</div>
+            <div class="pat-reveal-row">
+              <code id="newPatValue"></code>
+              <button type="button" class="btn btn-secondary btn-sm" id="btnCopyNewPat">Копировать</button>
+            </div>
+          </div>
+          <div id="patTokensList"></div>
+        </div>
+
+        <div class="panel-box p-16" style="margin-top: 16px;">
+          <h3 class="profile-card-title">Подключение MCP (Model Context Protocol)</h3>
+          <p class="profile-hint">Klukva предоставляет встроенный MCP HTTP-сервер (JSON-RPC 2.0) для AI-агентов (чтение/создание/обновление задач, комментарии, спринты, аналитика).</p>
+          <div class="mcp-config-wrap">
+            <pre class="mcp-config-code" id="mcpConfigCode"></pre>
+            <button type="button" class="btn btn-secondary btn-sm" id="btnCopyMcpConfig">Копировать конфиг</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tab 4: Role Management (ADMIN ONLY) -->
+      <div class="profile-tab-panel" id="profPanelRoles">
+        <div class="panel-box p-16">
+          <h3 class="profile-card-title">Ролевое разграничение доступа (RBAC)</h3>
+          <p class="profile-hint"><b>admin</b> — полный доступ и управление ролями; <b>manager</b> — управление спринтами и задачами; <b>member</b> — работа с задачами и комментариями; <b>viewer</b> — только чтение.</p>
+          <div id="rolesTableWrap"></div>
+        </div>
+      </div>
     </div>
   </div>
 
