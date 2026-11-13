@@ -75,6 +75,12 @@ class ProfileUpdateRequest(BaseModel):
     display_name: str = Field(..., min_length=1, max_length=80)
 
 
+class PreferencesUpdateRequest(BaseModel):
+    theme: Optional[str] = None
+    ui_style: Optional[str] = None
+    accent: Optional[str] = None
+
+
 class PasswordChangeRequest(BaseModel):
     current_password: str
     new_password: str = Field(..., min_length=3, max_length=128)
@@ -340,6 +346,7 @@ def me(current_user: Dict = Depends(get_current_user)):
         "totp_enabled": bool(fresh.get("totp_enabled", False)),
         "unread_notifications_count": notifs["unread_count"],
         "current_device_id": jwt_payload.get("device_id"),
+        "preferences": db.normalize_preferences(fresh.get("preferences")),
     }
 
 
@@ -388,6 +395,7 @@ def get_own_profile(current_user: Dict = Depends(get_current_user)):
             "last_login_at": fresh.get("last_login_at"),
             "login_count": fresh.get("login_count", 0),
             "totp_enabled": bool(fresh.get("totp_enabled", False)),
+            "preferences": db.normalize_preferences(fresh.get("preferences")),
         },
         "trusted_devices": devices,
         "pat_tokens": db.get_pats(fresh["id"]),
@@ -422,6 +430,22 @@ def update_own_profile(req: ProfileUpdateRequest, current_user: Dict = Depends(g
     updated = db.update_user_profile(current_user["id"], display_name=req.display_name)
     db.add_activity(current_user["username"], "profile_updated", details=f"Обновлено ФИО: {req.display_name.strip()}")
     return updated
+
+
+@router.patch("/profile/preferences")
+def update_own_preferences(req: PreferencesUpdateRequest, current_user: Dict = Depends(get_current_user)):
+    try:
+        prefs = db.update_user_preferences(
+            current_user["id"],
+            theme=req.theme,
+            ui_style=req.ui_style,
+            accent=req.accent,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if prefs is None:
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
+    return {"ok": True, "preferences": prefs}
 
 
 @router.post("/profile/password")

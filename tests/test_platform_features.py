@@ -451,3 +451,112 @@ def test_sirius_epic_task_hierarchy(client):
     }, headers=h_pat)
     sirius_mcp = json.loads(mcp_get.json()["result"]["content"][0]["text"])
     assert len(sirius_mcp["sirius_epics"]) == 2
+
+
+def test_user_appearance_preferences(client):
+    """Profile appearance preferences: defaults, updates, validation, and privacy."""
+    reg = _register(client, "prefuser")
+    h = {"Authorization": f"Bearer {reg['token']}"}
+
+    assert reg["user"]["preferences"] == {
+        "theme": "system",
+        "ui_style": "standard",
+        "accent": "default",
+    }
+
+    me_res = client.get("/api/auth/me", headers=h)
+    assert me_res.status_code == 200
+    assert me_res.json()["preferences"] == {
+        "theme": "system",
+        "ui_style": "standard",
+        "accent": "default",
+    }
+
+    prof_res = client.get("/api/profile", headers=h)
+    assert prof_res.status_code == 200
+    assert prof_res.json()["user"]["preferences"] == {
+        "theme": "system",
+        "ui_style": "standard",
+        "accent": "default",
+    }
+
+    # Update all fields
+    patch_res = client.patch(
+        "/api/profile/preferences",
+        json={"theme": "dark", "ui_style": "remaster", "accent": "sapphire"},
+        headers=h,
+    )
+    assert patch_res.status_code == 200
+    assert patch_res.json()["preferences"] == {
+        "theme": "dark",
+        "ui_style": "remaster",
+        "accent": "sapphire",
+    }
+
+    # Partial update keeps other fields intact
+    partial_res = client.patch(
+        "/api/profile/preferences",
+        json={"accent": "emerald"},
+        headers=h,
+    )
+    assert partial_res.status_code == 200
+    assert partial_res.json()["preferences"] == {
+        "theme": "dark",
+        "ui_style": "remaster",
+        "accent": "emerald",
+    }
+
+    # Verify persisted directly in JSON DB on disk
+    with open(db.file_path, "r", encoding="utf-8") as f:
+        raw_db = json.load(f)
+    stored_user = next(u for u in raw_db["users"] if u["username"] == "prefuser")
+    assert stored_user["preferences"] == {
+        "theme": "dark",
+        "ui_style": "remaster",
+        "accent": "emerald",
+    }
+
+    # Verify another device / fresh login receives DB-persisted preferences immediately
+    login_dev2 = client.post(
+        "/api/auth/login",
+        json={"username": "prefuser", "password": "pass123"},
+    )
+    assert login_dev2.status_code == 200
+    dev2_data = login_dev2.json()
+    assert dev2_data["user"]["preferences"] == {
+        "theme": "dark",
+        "ui_style": "remaster",
+        "accent": "emerald",
+    }
+    h_dev2 = {"Authorization": f"Bearer {dev2_data['token']}"}
+    me_dev2 = client.get("/api/auth/me", headers=h_dev2)
+    assert me_dev2.status_code == 200
+    assert me_dev2.json()["preferences"] == {
+        "theme": "dark",
+        "ui_style": "remaster",
+        "accent": "emerald",
+    }
+
+    # Persisted on subsequent reads
+    me_after = client.get("/api/auth/me", headers=h).json()
+    assert me_after["preferences"] == {
+        "theme": "dark",
+        "ui_style": "remaster",
+        "accent": "emerald",
+    }
+
+    # Validation errors on invalid values
+    bad_theme = client.patch("/api/profile/preferences", json={"theme": "midnight"}, headers=h)
+    assert bad_theme.status_code == 400
+    bad_style = client.patch("/api/profile/preferences", json={"ui_style": "retro98"}, headers=h)
+    assert bad_style.status_code == 400
+    bad_accent = client.patch("/api/profile/preferences", json={"accent": "neon_pink"}, headers=h)
+    assert bad_accent.status_code == 400
+
+    # Other users viewing public profile do not receive private preferences
+    reg2 = _register(client, "prefviewer")
+    h2 = {"Authorization": f"Bearer {reg2['token']}"}
+    pub_prof = client.get("/api/users/prefuser/profile", headers=h2)
+    assert pub_prof.status_code == 200
+    assert "preferences" not in pub_prof.json()["user"]
+

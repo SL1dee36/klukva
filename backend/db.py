@@ -80,6 +80,16 @@ VALID_CLUSTERS = ["", "Эпик", "Сириус"]
 VALID_ROLES = ["admin", "manager", "member", "viewer"]
 ROLE_HIERARCHY = {"viewer": 0, "member": 1, "manager": 2, "admin": 3}
 
+VALID_THEMES = ["system", "light", "dark"]
+VALID_UI_STYLES = ["standard", "remaster"]
+VALID_ACCENTS = ["default", "sapphire", "indigo", "violet", "teal", "emerald", "amber", "graphite"]
+
+DEFAULT_USER_PREFERENCES: Dict[str, str] = {
+    "theme": "system",
+    "ui_style": "standard",
+    "accent": "default",
+}
+
 # type -> (label for source, label for target)
 LINK_LABELS = {
     "relates": ("Связана с", "Связана с"),
@@ -157,6 +167,18 @@ class JSONDatabase:
             return "admin"
         return "member"
 
+    @staticmethod
+    def normalize_preferences(prefs: Optional[Dict[str, Any]]) -> Dict[str, str]:
+        src = prefs if isinstance(prefs, dict) else {}
+        theme = src.get("theme") if src.get("theme") in VALID_THEMES else DEFAULT_USER_PREFERENCES["theme"]
+        ui_style = src.get("ui_style") if src.get("ui_style") in VALID_UI_STYLES else DEFAULT_USER_PREFERENCES["ui_style"]
+        accent = src.get("accent") if src.get("accent") in VALID_ACCENTS else DEFAULT_USER_PREFERENCES["accent"]
+        return {
+            "theme": theme,
+            "ui_style": ui_style,
+            "accent": accent,
+        }
+
     @classmethod
     def public_user(cls, data: Dict[str, Any], u: Dict[str, Any], include_private: bool = False) -> Dict[str, Any]:
         role = cls._effective_role(data, u)
@@ -175,6 +197,7 @@ class JSONDatabase:
         if include_private:
             res["totp_enabled"] = bool(u.get("totp_enabled", False))
             res["must_change_credentials"] = bool(u.get("must_change_credentials", False))
+            res["preferences"] = cls.normalize_preferences(u.get("preferences"))
         return res
 
     def get_users(self) -> List[Dict[str, Any]]:
@@ -227,6 +250,7 @@ class JSONDatabase:
                 "totp_pending_secret": None,
                 "trusted_devices": [],
                 "pat_tokens": [],
+                "preferences": dict(DEFAULT_USER_PREFERENCES),
             }
             data["users"].append(new_user)
             self._atomic_write(data)
@@ -271,6 +295,7 @@ class JSONDatabase:
                 "totp_pending_secret": None,
                 "trusted_devices": [],
                 "pat_tokens": [],
+                "preferences": dict(DEFAULT_USER_PREFERENCES),
             }
             users.insert(0, sys_user)
             self._atomic_write(data)
@@ -314,6 +339,36 @@ class JSONDatabase:
                         u["avatar"] = avatar
                     self._atomic_write(data)
                     return self.public_user(data, u, include_private=True)
+            return None
+
+    def update_user_preferences(
+        self,
+        user_id: int,
+        theme: Optional[str] = None,
+        ui_style: Optional[str] = None,
+        accent: Optional[str] = None,
+    ) -> Optional[Dict[str, str]]:
+        if theme is not None and theme not in VALID_THEMES:
+            raise ValueError("Недопустимая тема оформления")
+        if ui_style is not None and ui_style not in VALID_UI_STYLES:
+            raise ValueError("Недопустимый стиль оформления")
+        if accent is not None and accent not in VALID_ACCENTS:
+            raise ValueError("Недопустимый акцентный цвет")
+
+        with _lock:
+            data = self._read_data()
+            for u in data.get("users", []):
+                if u["id"] == user_id:
+                    prefs = self.normalize_preferences(u.get("preferences"))
+                    if theme is not None:
+                        prefs["theme"] = theme
+                    if ui_style is not None:
+                        prefs["ui_style"] = ui_style
+                    if accent is not None:
+                        prefs["accent"] = accent
+                    u["preferences"] = prefs
+                    self._atomic_write(data)
+                    return prefs
             return None
 
     def update_user_role(self, user_id: int, role: str) -> Optional[Dict[str, Any]]:

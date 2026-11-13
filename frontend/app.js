@@ -17,7 +17,7 @@ function getCookieValue(name) {
         return decodeURIComponent(trimmed.slice(prefix.length));
       }
     }
-  } catch (e) {}
+  } catch (e) { }
   return null;
 }
 
@@ -25,27 +25,35 @@ function getStoredToken() {
   try {
     const ls = localStorage.getItem("klukva_token");
     if (ls) return ls;
-  } catch (e) {}
+  } catch (e) { }
   const ck = getCookieValue("klukva_token");
   if (ck) {
-    try { localStorage.setItem("klukva_token", ck); } catch (e) {}
+    try { localStorage.setItem("klukva_token", ck); } catch (e) { }
   }
   return ck;
 }
 
 function saveStoredToken(token) {
   if (!token) return;
-  try { localStorage.setItem("klukva_token", token); } catch (e) {}
+  try { localStorage.setItem("klukva_token", token); } catch (e) { }
   try {
     document.cookie = `klukva_token=${encodeURIComponent(token)}; path=/; max-age=7776000; SameSite=Lax`;
-  } catch (e) {}
+  } catch (e) { }
 }
 
 function clearStoredToken() {
-  try { localStorage.removeItem("klukva_token"); } catch (e) {}
+  try { localStorage.removeItem("klukva_token"); } catch (e) { }
   try {
     document.cookie = "klukva_token=; path=/; max-age=0; SameSite=Lax";
-  } catch (e) {}
+  } catch (e) { }
+}
+
+function clearStoredAppearanceCache() {
+  try {
+    localStorage.removeItem("klukva_theme");
+    localStorage.removeItem("klukva_ui_style");
+    localStorage.removeItem("klukva_accent");
+  } catch (e) { }
 }
 
 // Состояние приложения
@@ -69,6 +77,7 @@ const state = {
   currentTaskDetail: null,
   pendingTotpChallenge: null,
   viewingProfileUsername: null,
+  preferences: { theme: "system", ui_style: "standard", accent: "default" },
 };
 
 // ---------------- СОХРАНЕНИЕ ПОЛОЖЕНИЯ И СОСТОЯНИЯ (TAB, SCROLL, FILTERS) ----------------
@@ -90,7 +99,7 @@ function saveStateAndPosition() {
   };
   try {
     sessionStorage.setItem("klukva_scroll_positions", JSON.stringify(scrolls));
-  } catch (e) {}
+  } catch (e) { }
 
   const filters = {
     status: document.getElementById("filterStatus")?.value || "",
@@ -103,7 +112,7 @@ function saveStateAndPosition() {
   };
   try {
     sessionStorage.setItem("klukva_filters", JSON.stringify(filters));
-  } catch (e) {}
+  } catch (e) { }
 }
 
 const debouncedSavePosition = debounce(saveStateAndPosition, 150);
@@ -128,7 +137,7 @@ function restoreFilters() {
       document.getElementById("boardFilterOnlyMy")?.classList.add("active");
       document.getElementById("boardFilterAll")?.classList.remove("active");
     }
-  } catch (e) {}
+  } catch (e) { }
 }
 
 let restoreScrollTimer = null;
@@ -162,23 +171,228 @@ function restoreScrollPositions() {
 
       const sprintBacklogTable = document.querySelector("#sectionBacklog .table-scroll-wrapper");
       if (sprintBacklogTable && s.sprintBacklogTable) sprintBacklogTable.scrollTop = s.sprintBacklogTable;
-    } catch (e) {}
+    } catch (e) { }
   }, 30);
 }
 
-// ---------------- ТЕМА ОФОРМЛЕНИЯ ----------------
-function initTheme() {
-  const paramTheme = urlParams.get("theme");
-  const saved = paramTheme || localStorage.getItem("klukva_theme") || "light";
-  applyTheme(saved);
+// ---------------- ТЕМА ОФОРМЛЕНИЯ И СТИЛЬ ----------------
+const VALID_THEMES = ["system", "light", "dark"];
+const VALID_UI_STYLES = ["standard", "remaster"];
+const VALID_ACCENTS = ["default", "sapphire", "indigo", "violet", "teal", "emerald", "amber", "graphite"];
+const ACCENT_LABELS = {
+  default: "По умолчанию (Клюква)",
+  sapphire: "Сапфир",
+  indigo: "Индиго",
+  violet: "Фиалка",
+  teal: "Бирюза",
+  emerald: "Изумруд",
+  amber: "Янтарь",
+  graphite: "Графит",
+};
+
+let _themeMediaBound = false;
+let _prefVisibilityBound = false;
+let _prefSaveSeq = 0;
+let _prefSaveInFlight = 0;
+let _prefSaveChain = Promise.resolve();
+let _lastPrefSyncAt = 0;
+
+function normalizePreferences(prefs) {
+  const src = prefs && typeof prefs === "object" ? prefs : {};
+  return {
+    theme: VALID_THEMES.includes(src.theme) ? src.theme : "system",
+    ui_style: VALID_UI_STYLES.includes(src.ui_style) ? src.ui_style : "standard",
+    accent: VALID_ACCENTS.includes(src.accent) ? src.accent : "default",
+  };
+}
+
+function resolveThemeMode(themeMode) {
+  if (themeMode === "dark") return "dark";
+  if (themeMode === "light") return "light";
+  const prefersDark = Boolean(window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches);
+  return prefersDark ? "dark" : "light";
+}
+
+function syncAppearanceControls() {
+  const prefs = normalizePreferences(state.preferences);
+  const themeButtons = document.querySelectorAll("[data-pref-theme]");
+  themeButtons.forEach((btn) => {
+    const active = btn.dataset.prefTheme === prefs.theme;
+    btn.classList.toggle("active", active);
+    btn.setAttribute("aria-pressed", active ? "true" : "false");
+  });
+
+  const styleCards = document.querySelectorAll("[data-pref-style]");
+  styleCards.forEach((card) => {
+    const active = card.dataset.prefStyle === prefs.ui_style;
+    card.classList.toggle("active", active);
+    card.setAttribute("aria-pressed", active ? "true" : "false");
+  });
+
+  const accentSection = document.getElementById("prefAccentSection");
+  if (accentSection) {
+    accentSection.style.display = prefs.ui_style === "remaster" ? "block" : "none";
+  }
+
+  const accentBtns = document.querySelectorAll("[data-pref-accent]");
+  accentBtns.forEach((btn) => {
+    const active = btn.dataset.prefAccent === prefs.accent;
+    btn.classList.toggle("active", active);
+    btn.setAttribute("aria-pressed", active ? "true" : "false");
+  });
+
+  const accentLabel = document.getElementById("prefAccentLabel");
+  if (accentLabel) {
+    accentLabel.textContent = ACCENT_LABELS[prefs.accent] || ACCENT_LABELS.default;
+  }
+
+  const previewBadge = document.getElementById("prefPreviewBadge");
+  if (previewBadge) {
+    previewBadge.textContent = prefs.ui_style === "remaster"
+      ? `Ремастер · ${ACCENT_LABELS[prefs.accent] || ACCENT_LABELS.default}`
+      : "Стандартный";
+  }
+}
+
+function applyAppearance(partialOrFull, options = {}) {
+  const next = normalizePreferences({ ...state.preferences, ...(partialOrFull || {}) });
+  state.preferences = next;
+
+  const resolvedTheme = resolveThemeMode(next.theme);
+  const root = document.documentElement;
+  root.setAttribute("data-theme-mode", next.theme);
+  root.setAttribute("data-theme", resolvedTheme);
+  root.setAttribute("data-style", next.ui_style);
+  root.setAttribute("data-accent", next.accent);
+
+  if (options.persistLocal !== false) {
+    localStorage.setItem("klukva_theme", next.theme);
+    localStorage.setItem("klukva_ui_style", next.ui_style);
+    localStorage.setItem("klukva_accent", next.accent);
+  }
+
+  syncAppearanceControls();
 }
 
 function applyTheme(theme) {
-  document.documentElement.setAttribute("data-theme", theme);
-  localStorage.setItem("klukva_theme", theme);
-  const text = document.getElementById("themeToggleText");
-  if (text) {
-    text.textContent = theme === "dark" ? "Светлая тема" : "Тёмная тема";
+  applyAppearance({ theme });
+}
+
+function hydrateAppearanceFromUser(userObj) {
+  if (!userObj || !userObj.preferences) {
+    syncAppearanceControls();
+    return;
+  }
+  const paramTheme = urlParams.get("theme");
+  const hasValidParamTheme = VALID_THEMES.includes(paramTheme);
+  const hydrated = normalizePreferences(userObj.preferences);
+  applyAppearance(
+    hasValidParamTheme ? { ...hydrated, theme: paramTheme } : hydrated,
+    { persistLocal: !hasValidParamTheme }
+  );
+}
+
+async function syncPreferencesFromServer() {
+  if (!state.token || !state.currentUser || state.currentUser.must_change_credentials) return;
+  if (_prefSaveInFlight > 0) return;
+  const now = Date.now();
+  if (now - _lastPrefSyncAt < 5000) return;
+  _lastPrefSyncAt = now;
+  const seqBefore = _prefSaveSeq;
+  try {
+    const me = await api("/api/auth/me");
+    if (!me || seqBefore !== _prefSaveSeq || _prefSaveInFlight > 0) return;
+    if (me.preferences) {
+      const serverPrefs = normalizePreferences(me.preferences);
+      state.currentUser.preferences = serverPrefs;
+      const cur = state.preferences;
+      if (
+        serverPrefs.theme !== cur.theme ||
+        serverPrefs.ui_style !== cur.ui_style ||
+        serverPrefs.accent !== cur.accent
+      ) {
+        hydrateAppearanceFromUser(state.currentUser);
+      }
+    }
+  } catch (e) {
+    // Silent background sync on focus/visibility
+  }
+}
+
+async function savePreferencesRemote(partial) {
+  const fallbackPrefs = normalizePreferences(state.currentUser?.preferences || state.preferences);
+  const reqSeq = ++_prefSaveSeq;
+  applyAppearance(partial);
+  if (!state.token || !state.currentUser || state.currentUser.must_change_credentials) {
+    return;
+  }
+
+  _prefSaveInFlight += 1;
+  const targetPayload = { ...state.preferences };
+  const task = async () => {
+    try {
+      const res = await api("/api/profile/preferences", {
+        method: "PATCH",
+        body: JSON.stringify(targetPayload),
+      });
+      if (res && res.preferences) {
+        const saved = normalizePreferences(res.preferences);
+        state.currentUser.preferences = saved;
+        _lastPrefSyncAt = Date.now();
+        if (reqSeq === _prefSaveSeq) {
+          applyAppearance(saved);
+        }
+      }
+    } catch (err) {
+      if (reqSeq === _prefSaveSeq) {
+        applyAppearance(fallbackPrefs);
+      }
+      showToast(`Не удалось сохранить настройки: ${err.message || "ошибка сети"}`);
+    } finally {
+      _prefSaveInFlight = Math.max(0, _prefSaveInFlight - 1);
+    }
+  };
+
+  _prefSaveChain = _prefSaveChain.then(task, task);
+  return _prefSaveChain;
+}
+
+function initTheme() {
+  const paramTheme = urlParams.get("theme");
+  const hasValidParamTheme = VALID_THEMES.includes(paramTheme);
+  const savedTheme = hasValidParamTheme
+    ? paramTheme
+    : (localStorage.getItem("klukva_theme") || "system");
+  const savedStyle = localStorage.getItem("klukva_ui_style") || "standard";
+  const savedAccent = localStorage.getItem("klukva_accent") || "default";
+
+  applyAppearance(
+    { theme: savedTheme, ui_style: savedStyle, accent: savedAccent },
+    { persistLocal: !hasValidParamTheme }
+  );
+
+  if (!_themeMediaBound && window.matchMedia) {
+    _themeMediaBound = true;
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    const onSystemChange = () => {
+      if (state.preferences.theme === "system") {
+        applyAppearance({ theme: "system" }, { persistLocal: false });
+      }
+    };
+    if (mq.addEventListener) {
+      mq.addEventListener("change", onSystemChange);
+    } else if (mq.addListener) {
+      mq.addListener(onSystemChange);
+    }
+  }
+
+  if (!_prefVisibilityBound && typeof document !== "undefined") {
+    _prefVisibilityBound = true;
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") {
+        syncPreferencesFromServer();
+      }
+    });
   }
 }
 
@@ -419,6 +633,10 @@ function renderParentChip(task) {
   return chips.join("");
 }
 
+function renderTaskTitleHtml(task) {
+  return `${renderTypeBadge(task.task_type)}${renderParentChip(task)}<span class="task-title-text">${escapeHtml(task.title)}</span>${renderLinkIndicators(task)}`;
+}
+
 function renderUserAvatarContent(userOrName, fallbackName = "U") {
   if (userOrName && typeof userOrName === "object") {
     if (userOrName.avatar_url) {
@@ -487,6 +705,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
 async function onAuthSuccess() {
   hideAuthModal();
+  hydrateAppearanceFromUser(state.currentUser);
   updateUserHeader();
 
   if (state.currentUser?.must_change_credentials) {
@@ -740,7 +959,7 @@ function renderPureBacklog() {
     // Название
     const tdTitle = document.createElement("td");
     tdTitle.className = "task-title-cell";
-    tdTitle.innerHTML = `${renderTypeBadge(t.task_type)}${renderParentChip(t)}<span>${escapeHtml(t.title)}</span>${renderLinkIndicators(t)}`;
+    tdTitle.innerHTML = renderTaskTitleHtml(t);
     tdTitle.onclick = () => openTaskDetail(t.id);
     tr.appendChild(tdTitle);
 
@@ -885,7 +1104,7 @@ function createDraggableTaskRow(task, inSprint) {
   // Название
   const tdTitle = document.createElement("td");
   tdTitle.className = "task-title-cell";
-  tdTitle.innerHTML = `${renderTypeBadge(task.task_type)}${renderParentChip(task)}<span>${escapeHtml(task.title)}</span>${renderLinkIndicators(task)}`;
+  tdTitle.innerHTML = renderTaskTitleHtml(task);
   tdTitle.onclick = () => openTaskDetail(task.id);
   tr.appendChild(tdTitle);
 
@@ -1267,7 +1486,7 @@ function createScrumCard(task) {
       <span class="task-key-link" onclick="openTaskDetail(${task.id})">${task.key}</span>
       ${task.story_points ? `<span class="sp-badge">${task.story_points} SP</span>` : ""}
     </div>
-    <div class="scrum-card-title" onclick="openTaskDetail(${task.id})">${renderTypeBadge(task.task_type)}${renderParentChip(task)}${escapeHtml(task.title)}${renderLinkIndicators(task)}</div>
+    <div class="scrum-card-title" onclick="openTaskDetail(${task.id})">${renderTaskTitleHtml(task)}</div>
     <div class="scrum-card-bottom">
       <div>${renderStatusBadge(task.status)}</div>
       ${avatarHtml}
@@ -1747,7 +1966,7 @@ function openAttachmentPreview(taskId, att) {
   else if (kind === "video") body = `<video src="${url}" controls autoplay></video>`;
   else if (kind === "audio") body = `<audio src="${url}" controls autoplay></audio>`;
   else if (kind === "pdf" || (att.content_type || "").startsWith("text/")) body = `<iframe src="${url}"></iframe>`;
-  else body = `<div class="links-empty">Предпросмотр недоступен. <a href="${attachmentUrl(taskId, att, true)}" download>Скачать файл</a></div>`;
+  else body = `<div class="links-empty">Предпросмотр недоступен. <a class="sys-file-link" href="${attachmentUrl(taskId, att, true)}" download>Скачать файл</a></div>`;
   box.innerHTML = `
     <div class="attachment-preview-header">
       <span>${escapeHtml(att.filename)}</span>
@@ -2241,10 +2460,11 @@ async function handleLogout() {
   if (confirm("Выйти из учетной записи?")) {
     try {
       await api("/api/auth/logout?revoke_device=true", { method: "POST" });
-    } catch (e) {}
+    } catch (e) { }
     state.token = null;
     state.currentUser = null;
     clearStoredToken();
+    clearStoredAppearanceCache();
     location.reload();
   }
 }
@@ -2303,7 +2523,7 @@ function setupEventListeners() {
     if (document.getElementById("filterTaskType")) document.getElementById("filterTaskType").value = "";
     if (document.getElementById("filterCluster")) document.getElementById("filterCluster").value = "";
     document.getElementById("filterSearch").value = "";
-    try { sessionStorage.removeItem("klukva_filters"); } catch (e) {}
+    try { sessionStorage.removeItem("klukva_filters"); } catch (e) { }
     loadTasks();
   });
 
@@ -2456,12 +2676,6 @@ function setupEventListeners() {
   });
   document.getElementById("btnLogout").addEventListener("click", handleLogout);
 
-  // Переключение темы
-  document.getElementById("btnThemeToggle").addEventListener("click", () => {
-    const current = document.documentElement.getAttribute("data-theme") || "light";
-    applyTheme(current === "dark" ? "light" : "dark");
-  });
-
   // Drag-and-Drop зоны спринта и бэклога
   setupSprintDropZones();
 
@@ -2505,7 +2719,7 @@ function switchTab(tab, updateUrl = true) {
         currentUrl.searchParams.set("tab", tab);
         window.history.replaceState({ tab }, "", currentUrl.toString());
       }
-    } catch (e) {}
+    } catch (e) { }
   }
 
   document.querySelectorAll(".tab-btn").forEach(btn => {
@@ -2548,7 +2762,7 @@ async function loadNotifications() {
     if (!notifPollTimer) {
       notifPollTimer = setInterval(loadNotifications, 30000);
     }
-  } catch (e) {}
+  } catch (e) { }
 }
 
 function renderNotifications(data) {
@@ -2580,7 +2794,7 @@ function renderNotifications(data) {
           await api(`/api/notifications/${n.id}/read`, { method: "POST" });
           n.read = true;
           loadNotifications();
-        } catch (e) {}
+        } catch (e) { }
       }
       document.getElementById("notifDropdown").style.display = "none";
       if (n.task_id) openTaskDetail(n.task_id);
@@ -2660,6 +2874,7 @@ async function openProfileView(username = null) {
   document.getElementById("profAvatarActions").style.display = (isOwn && !mustForce) ? "flex" : "none";
   document.getElementById("profBtnTabActivity").style.display = mustForce ? "none" : "inline-block";
   document.getElementById("profBtnTabSecurity").style.display = isOwn ? "inline-block" : "none";
+  document.getElementById("profBtnTabSettings").style.display = (isOwn && !mustForce) ? "inline-block" : "none";
   document.getElementById("profBtnTabTokens").style.display = (isOwn && !mustForce) ? "inline-block" : "none";
   document.getElementById("profBtnTabRoles").style.display = (isOwn && !mustForce && hasMinRole("admin")) ? "inline-block" : "none";
   document.getElementById("profTotpStatusItem").style.display = isOwn ? "block" : "none";
@@ -2696,6 +2911,7 @@ async function openProfileView(username = null) {
 
     if (isOwn) {
       state.currentUser = { ...state.currentUser, ...u };
+      hydrateAppearanceFromUser(state.currentUser);
       updateUserHeader();
       document.getElementById("btnRemoveAvatar").style.display = u.avatar_url ? "inline-flex" : "none";
       document.getElementById("inputProfDisplayName").value = u.display_name || "";
@@ -2735,12 +2951,16 @@ function switchProfileSubtab(tabName) {
   const map = {
     activity: "profPanelActivity",
     security: "profPanelSecurity",
+    settings: "profPanelSettings",
     tokens: "profPanelTokens",
     roles: "profPanelRoles"
   };
   Object.entries(map).forEach(([k, id]) => {
     document.getElementById(id)?.classList.toggle("active", k === tabName);
   });
+  if (tabName === "settings") {
+    syncAppearanceControls();
+  }
 }
 
 function renderProfileActivity(activity) {
@@ -2881,9 +3101,9 @@ function renderRolesManagement() {
       <td>${u.last_login_at ? formatDate(u.last_login_at) : "—"}</td>
       <td>
         ${u.is_system
-          ? "<b>admin (system)</b>"
-          : `<select class="form-control select-sm" style="max-width: 150px;">${roles.map(r => `<option value="${r}" ${(u.role || "member") === r ? "selected" : ""}>${r}</option>`).join("")}</select>`
-        }
+        ? "<b>admin (system)</b>"
+        : `<select class="form-control select-sm" style="max-width: 150px;">${roles.map(r => `<option value="${r}" ${(u.role || "member") === r ? "selected" : ""}>${r}</option>`).join("")}</select>`
+      }
       </td>
     `;
     const select = tr.querySelector("select");
@@ -2913,6 +3133,33 @@ function setupProfileListeners() {
 
   document.querySelectorAll(".profile-subtab[data-proftab]").forEach(btn => {
     btn.addEventListener("click", () => switchProfileSubtab(btn.dataset.proftab));
+  });
+
+  document.querySelectorAll("[data-pref-theme]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const theme = btn.dataset.prefTheme;
+      if (VALID_THEMES.includes(theme)) {
+        savePreferencesRemote({ theme });
+      }
+    });
+  });
+
+  document.querySelectorAll("[data-pref-style]").forEach(card => {
+    card.addEventListener("click", () => {
+      const uiStyle = card.dataset.prefStyle;
+      if (VALID_UI_STYLES.includes(uiStyle)) {
+        savePreferencesRemote({ ui_style: uiStyle });
+      }
+    });
+  });
+
+  document.querySelectorAll("[data-pref-accent]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const accent = btn.dataset.prefAccent;
+      if (VALID_ACCENTS.includes(accent)) {
+        savePreferencesRemote({ accent });
+      }
+    });
   });
 
   // Forced Credentials Change (system user first login)
@@ -3152,7 +3399,7 @@ function renderHierarchyAnalyticsCard(title, items, kind) {
     const emptyLabel = kind === "sirius" ? "Сириусов пока нет" : "Эпиков пока нет";
     return `<div class="chart-card"><div class="chart-card-title">${escapeHtml(title)}</div><div class="links-empty">${emptyLabel}</div></div>`;
   }
-  const color = kind === "sirius" ? "#0284c7" : "#be123c";
+  const color = kind === "sirius" ? "#0284c7" : "var(--accent)";
   const rows = items.map(item => {
     const total = Number(item.total_tasks || 0);
     const done = Number(item.done_tasks || 0);
@@ -3464,7 +3711,7 @@ async function loadSystemFiles() {
         const openUrl = `${a.file_url}?token=${tokenParam}`;
         const dlUrl = `${a.file_url}?download=true&token=${tokenParam}`;
         tr.innerHTML = `
-          <td><a href="${openUrl}" target="_blank" rel="noopener">${escapeHtml(a.filename)}</a></td>
+          <td><a href="${openUrl}" class="sys-file-link" target="_blank" rel="noopener">${escapeHtml(a.filename)}</a></td>
           <td>${a.task_key ? `<span class="task-key-link" data-tid="${a.task_id}">${escapeHtml(a.task_key)}</span>` : "—"}</td>
           <td>${formatFileSize(a.size)}</td>
           <td>@${escapeHtml(a.uploaded_by || "—")}</td>
@@ -3530,9 +3777,9 @@ async function loadSystemUsers() {
         <td>@${escapeHtml(u.username)}</td>
         <td>
           ${u.is_system
-            ? "<b>admin (system)</b>"
-            : `<select class="form-control select-sm sys-role-sel" style="max-width: 120px;">${roles.map(r => `<option value="${r}" ${u.role === r ? "selected" : ""}>${r}</option>`).join("")}</select>`
-          }
+          ? "<b>admin (system)</b>"
+          : `<select class="form-control select-sm sys-role-sel" style="max-width: 120px;">${roles.map(r => `<option value="${r}" ${u.role === r ? "selected" : ""}>${r}</option>`).join("")}</select>`
+        }
         </td>
         <td>${u.totp_enabled ? "Включена" : "Нет"}</td>
         <td>${u.trusted_devices_count ?? 0}</td>
