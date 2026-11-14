@@ -498,11 +498,15 @@ async function handleCloseSprint() {
 // ---------------- ОБНОВЛЕНИЕ ИЗ РЕПОЗИТОРИЯ ----------------
 async function handleAppUpdate() {
   const btn = document.getElementById("btnAppUpdate");
+  const btnSys = document.getElementById("btnSysAppUpdate");
   const icon = document.getElementById("btnUpdateIcon");
   const text = document.getElementById("btnUpdateText");
-  if (!btn) return;
 
-  btn.disabled = true;
+  if (btn) btn.disabled = true;
+  if (btnSys) {
+    btnSys.disabled = true;
+    btnSys.textContent = "Обновление...";
+  }
   if (icon) icon.classList.add("spinning");
   if (text) text.textContent = "Обновление...";
 
@@ -522,7 +526,11 @@ async function handleAppUpdate() {
   } catch (err) {
     showToast(`Ошибка запроса обновления: ${err.message}`);
   } finally {
-    btn.disabled = false;
+    if (btn) btn.disabled = false;
+    if (btnSys) {
+      btnSys.disabled = false;
+      btnSys.textContent = "🔄 Обновить из Git";
+    }
     if (icon) icon.classList.remove("spinning");
     if (text) text.textContent = "Обновить";
   }
@@ -739,13 +747,13 @@ function updateUserHeader() {
   const avatar = document.getElementById("userAvatar");
   const roleBadge = document.getElementById("userRoleBadge");
   const btnCreateTask = document.getElementById("btnOpenCreateTask");
-  const btnUpdate = document.getElementById("btnAppUpdate");
+  const profSysCard = document.getElementById("profSystemSettingsCard");
   const navSystem = document.getElementById("navTabSystem");
 
   if (state.currentUser) {
     profileDiv.style.display = "flex";
     if (notifWrapper) notifWrapper.style.display = state.currentUser.must_change_credentials ? "none" : "block";
-    label.textContent = `${state.currentUser.display_name} (@${state.currentUser.username})`;
+    label.textContent = state.currentUser.display_name || state.currentUser.username;
     avatar.innerHTML = renderUserAvatarContent(state.currentUser);
     if (roleBadge) {
       if (state.currentUser.is_system) {
@@ -758,11 +766,12 @@ function updateUserHeader() {
       }
     }
     if (btnCreateTask) btnCreateTask.style.display = hasMinRole("member") ? "inline-flex" : "none";
-    if (btnUpdate) btnUpdate.style.display = hasMinRole("admin") ? "inline-flex" : "none";
+    if (profSysCard) profSysCard.style.display = hasMinRole("admin") ? "block" : "none";
     if (navSystem) navSystem.style.display = state.currentUser.is_system ? "inline-flex" : "none";
   } else {
     profileDiv.style.display = "none";
     if (notifWrapper) notifWrapper.style.display = "none";
+    if (profSysCard) profSysCard.style.display = "none";
     if (navSystem) navSystem.style.display = "none";
   }
 }
@@ -1481,6 +1490,11 @@ function createScrumCard(task) {
     ? `<span class="scrum-card-avatar" title="${escapeHtml(task.assignee)}">${renderUserAvatarContent(uObj || task.assignee)}</span>`
     : "";
 
+  const statuses = ["Бэклог", "Не реализовано", "В работе", "Реализовано частично", "Завершено"];
+  const statusOptions = statuses
+    .map(s => `<option value="${s}" ${s === task.status ? "selected" : ""}>${s}</option>`)
+    .join("");
+
   card.innerHTML = `
     <div class="scrum-card-top">
       <span class="task-key-link" onclick="openTaskDetail(${task.id})">${task.key}</span>
@@ -1491,7 +1505,27 @@ function createScrumCard(task) {
       <div>${renderStatusBadge(task.status)}</div>
       ${avatarHtml}
     </div>
+    <select class="form-control select-sm scrum-card-mobile-status" aria-label="Статус задачи">${statusOptions}</select>
   `;
+
+  const mobileStatusSelect = card.querySelector(".scrum-card-mobile-status");
+  if (mobileStatusSelect) {
+    mobileStatusSelect.addEventListener("click", (e) => e.stopPropagation());
+    mobileStatusSelect.addEventListener("change", async (e) => {
+      const newStatus = e.target.value;
+      try {
+        await api(`/api/tasks/${task.id}`, {
+          method: "PATCH",
+          body: JSON.stringify({ status: newStatus })
+        });
+        showToast(`Статус изменён на "${newStatus}"`);
+        await loadTasks();
+      } catch (err) {
+        showToast("Ошибка: " + err.message);
+        e.target.value = task.status;
+      }
+    });
+  }
 
   card.addEventListener("dragstart", (e) => {
     draggedTaskId = task.id;
@@ -2502,6 +2536,21 @@ function setupEventListeners() {
     renderScrumBoard();
   });
 
+  // Переключатель колонок скрам-доски на мобильных экранах
+  const boardColTabs = document.getElementById("boardMobileColTabs");
+  if (boardColTabs) {
+    boardColTabs.addEventListener("click", (e) => {
+      const btn = e.target.closest(".board-col-tab");
+      if (!btn) return;
+      const col = btn.dataset.boardCol;
+      const viewBoard = document.getElementById("viewBoard");
+      if (viewBoard) viewBoard.dataset.mobileCol = col;
+      boardColTabs.querySelectorAll(".board-col-tab").forEach((b) => {
+        b.classList.toggle("active", b === btn);
+      });
+    });
+  }
+
   // Модальное окно создания спринта
   document.getElementById("btnCreateSprintInTab").addEventListener("click", openCreateSprintModal);
   document.getElementById("btnCloseSprintInTab").addEventListener("click", handleCloseSprint);
@@ -2531,6 +2580,10 @@ function setupEventListeners() {
   const btnAppUpdate = document.getElementById("btnAppUpdate");
   if (btnAppUpdate) {
     btnAppUpdate.addEventListener("click", handleAppUpdate);
+  }
+  const btnSysAppUpdate = document.getElementById("btnSysAppUpdate");
+  if (btnSysAppUpdate) {
+    btnSysAppUpdate.addEventListener("click", handleAppUpdate);
   }
 
   // Сохранение положения при прокрутке и перед выгрузкой страницы
