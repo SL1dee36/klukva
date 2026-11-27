@@ -1885,6 +1885,16 @@ class SystemSettingsUpdateRequest(BaseModel):
     tempo_daily_hours: Optional[int] = Field(None, ge=1, le=24)
     tempo_workdays: Optional[int] = Field(None, ge=1, le=7)
     archive_enabled: Optional[bool] = None
+    checklists_enabled: Optional[bool] = None
+
+
+class ChecklistItemCreateRequest(BaseModel):
+    text: str = Field(..., min_length=1, max_length=300)
+
+
+class ChecklistItemUpdateRequest(BaseModel):
+    done: Optional[bool] = None
+    text: Optional[str] = Field(None, min_length=1, max_length=300)
 
 
 class WorklogCreateRequest(BaseModel):
@@ -1911,7 +1921,53 @@ def update_system_settings(
     if "archive_enabled" in updates:
         state_lbl = "включена" if res["archive_enabled"] else "выключена"
         db.add_activity(current_user["username"], "system_settings", details=f"Архивация задач {state_lbl}")
+    if "checklists_enabled" in updates:
+        state_lbl = "включены" if res["checklists_enabled"] else "выключены"
+        db.add_activity(current_user["username"], "system_settings", details=f"Чек-листы в задачах {state_lbl}")
     return res
+
+
+@router.post("/tasks/{task_id}/checklist", status_code=201)
+def add_task_checklist_item(
+    task_id: int,
+    req: ChecklistItemCreateRequest,
+    current_user: Dict = Depends(require_role("member")),
+):
+    if not db.get_system_settings().get("checklists_enabled"):
+        raise HTTPException(status_code=403, detail="Чек-листы отключены администратором")
+    task = db.add_checklist_item(task_id, req.text)
+    if not task:
+        raise HTTPException(status_code=404, detail="Задача не найдена")
+    return task
+
+
+@router.patch("/tasks/{task_id}/checklist/{item_id}")
+def update_task_checklist_item(
+    task_id: int,
+    item_id: int,
+    req: ChecklistItemUpdateRequest,
+    current_user: Dict = Depends(require_role("member")),
+):
+    if not db.get_system_settings().get("checklists_enabled"):
+        raise HTTPException(status_code=403, detail="Чек-листы отключены администратором")
+    task = db.update_checklist_item(task_id, item_id, done=req.done, text=req.text)
+    if not task:
+        raise HTTPException(status_code=404, detail="Задача или пункт не найдены")
+    return task
+
+
+@router.delete("/tasks/{task_id}/checklist/{item_id}")
+def delete_task_checklist_item(
+    task_id: int,
+    item_id: int,
+    current_user: Dict = Depends(require_role("member")),
+):
+    if not db.get_system_settings().get("checklists_enabled"):
+        raise HTTPException(status_code=403, detail="Чек-листы отключены администратором")
+    task = db.delete_checklist_item(task_id, item_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Задача не найдена")
+    return task
 
 
 @router.post("/tasks/{task_id}/archive")

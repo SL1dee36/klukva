@@ -89,6 +89,7 @@ const state = {
   selectedBacklogIds: new Set(),
   tempoEnabled: false,
   archiveEnabled: false,
+  checklistsEnabled: false,
   tempoDailyHours: 8,
   tempoWorkdays: 5,
   tempoWeekStart: null,
@@ -2364,6 +2365,7 @@ async function openTaskDetail(taskId, options = {}) {
 
     updatePartialSplitBoxVisibility();
     renderHierarchyChildren(task);
+    renderTaskChecklist(task);
     renderComments(task.comments || []);
     resetLinkForm();
     loadLinks(taskId);
@@ -3281,6 +3283,7 @@ function setupEventListeners() {
   document.getElementById("btnExportAnalyticsCsv")?.addEventListener("click", exportAnalyticsCsv);
   setupTempoListeners();
   setupArchiveListeners();
+  setupChecklistListeners();
 
   setupNotificationListeners();
   setupProfileListeners();
@@ -5201,6 +5204,14 @@ function applyTempoVisibility() {
   if (btnOpenArch) btnOpenArch.style.display = archOn ? "inline-flex" : "none";
   if (btnArchTask && !archOn) btnArchTask.style.display = "none";
 
+  const clOn = Boolean(state.checklistsEnabled);
+  const chkCl = document.getElementById("chkChecklistsEnabled");
+  const lblCl = document.getElementById("lblChecklistsEnabledState");
+  const secCl = document.getElementById("taskChecklistSection");
+  if (chkCl) chkCl.checked = clOn;
+  if (lblCl) lblCl.textContent = clOn ? "Включено" : "Выключено";
+  if (secCl && !clOn) secCl.style.display = "none";
+
   const hrsInput = document.getElementById("inputTempoDailyHours");
   const wdSelect = document.getElementById("selectTempoWorkdays");
   if (hrsInput) hrsInput.value = String(state.tempoDailyHours || 8);
@@ -5216,6 +5227,7 @@ async function loadSystemSettings() {
     const s = await api("/api/system/settings");
     state.tempoEnabled = Boolean(s && s.tempo_enabled);
     state.archiveEnabled = Boolean(s && s.archive_enabled);
+    state.checklistsEnabled = Boolean(s && s.checklists_enabled);
     state.tempoDailyHours = Number(s?.tempo_daily_hours || 8);
     state.tempoWorkdays = Number(s?.tempo_workdays || 5);
   } catch (err) {
@@ -5925,4 +5937,120 @@ async function openArchiveModal() {
   } catch (err) {
     body.innerHTML = `<div class="links-empty">${escapeHtml(err.message)}</div>`;
   }
+}
+
+// ============================================================================
+// CHECKLISTS INSIDE TASKS (v2.13.0, ADMIN TOGGLED)
+// ============================================================================
+function setupChecklistListeners() {
+  const chk = document.getElementById("chkChecklistsEnabled");
+  if (chk) {
+    chk.addEventListener("change", async () => {
+      const nextVal = chk.checked;
+      chk.disabled = true;
+      try {
+        const res = await api("/api/system/settings", {
+          method: "PATCH",
+          body: JSON.stringify({ checklists_enabled: nextVal })
+        });
+        state.checklistsEnabled = Boolean(res.checklists_enabled);
+        applyTempoVisibility();
+        if (state.currentTaskDetail) renderTaskChecklist(state.currentTaskDetail);
+        showToast(state.checklistsEnabled ? "Чек-листы в задачах включены" : "Чек-листы в задачах выключены");
+      } catch (err) {
+        chk.checked = state.checklistsEnabled;
+        showToast(`Ошибка: ${err.message}`);
+      } finally {
+        chk.disabled = false;
+      }
+    });
+  }
+
+  document.getElementById("formAddChecklistItem")?.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    if (!state.currentTaskDetail || !state.checklistsEnabled) return;
+    const inp = document.getElementById("inputChecklistText");
+    const text = inp ? inp.value.trim() : "";
+    if (!text) return;
+    try {
+      const updated = await api(`/api/tasks/${state.currentTaskDetail.id}/checklist`, {
+        method: "POST",
+        body: JSON.stringify({ text })
+      });
+      if (inp) inp.value = "";
+      state.currentTaskDetail = { ...state.currentTaskDetail, ...updated };
+      renderTaskChecklist(state.currentTaskDetail);
+      await loadTasks();
+    } catch (err) {
+      showToast(`Ошибка: ${err.message}`);
+    }
+  });
+}
+
+function renderTaskChecklist(task) {
+  const sec = document.getElementById("taskChecklistSection");
+  const sumEl = document.getElementById("taskChecklistSummary");
+  const barEl = document.getElementById("taskChecklistProgressBar");
+  const listEl = document.getElementById("taskChecklistItems");
+  if (!sec || !listEl) return;
+
+  if (!state.checklistsEnabled) {
+    sec.style.display = "none";
+    return;
+  }
+  sec.style.display = "block";
+
+  const items = task.checklist || [];
+  const total = items.length;
+  const done = items.filter(i => i.done).length;
+  const pct = total ? Math.round((done / total) * 100) : 0;
+
+  if (sumEl) sumEl.textContent = `${done}/${total} (${pct}%)`;
+  if (barEl) barEl.style.width = `${pct}%`;
+
+  if (!items.length) {
+    listEl.innerHTML = '<div class="links-empty" style="margin-bottom: 8px;">Пунктов пока нет</div>';
+    return;
+  }
+
+  listEl.innerHTML = "";
+  items.forEach(item => {
+    const row = document.createElement("div");
+    row.className = `checklist-item-row ${item.done ? "is-done" : ""}`;
+    row.innerHTML = `
+      <label class="checklist-item-label">
+        <input type="checkbox" ${item.done ? "checked" : ""}>
+        <span>${escapeHtml(item.text)}</span>
+      </label>
+      <button type="button" class="btn-link-del" title="Удалить пункт">&times;</button>
+    `;
+    const cb = row.querySelector('input[type="checkbox"]');
+    if (cb) {
+      cb.addEventListener("change", async () => {
+        try {
+          const updated = await api(`/api/tasks/${task.id}/checklist/${item.id}`, {
+            method: "PATCH",
+            body: JSON.stringify({ done: cb.checked })
+          });
+          state.currentTaskDetail = { ...state.currentTaskDetail, ...updated };
+          renderTaskChecklist(state.currentTaskDetail);
+          await loadTasks();
+        } catch (err) {
+          cb.checked = !cb.checked;
+          showToast(err.message);
+        }
+      });
+    }
+    row.querySelector(".btn-link-del")?.addEventListener("click", async () => {
+      try {
+        const updated = await api(`/api/tasks/${task.id}/checklist/${item.id}`, { method: "DELETE" });
+        state.currentTaskDetail = { ...state.currentTaskDetail, ...updated };
+        renderTaskChecklist(state.currentTaskDetail);
+        await loadTasks();
+      } catch (err) {
+        showToast(err.message);
+      }
+    });
+    listEl.appendChild(row);
+  });
 }

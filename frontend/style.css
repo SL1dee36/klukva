@@ -7306,3 +7306,50 @@ select.select-sm optgroup {
   gap: 16px;
   flex-wrap: wrap;
 }
+
+/* ==========================================================================
+   TASK CHECKLISTS (v2.13.0)
+   ========================================================================== */
+.checklist-items-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.checklist-item-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px;
+  background: var(--bg-app);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+}
+
+.checklist-item-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  flex: 1;
+  min-width: 0;
+  color: var(--text-main);
+}
+
+.checklist-item-row.is-done .checklist-item-label span {
+  text-decoration: line-through;
+  color: var(--text-muted);
+}
+
+.checklist-add-form {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.checklist-add-form input {
+  flex: 1;
+}

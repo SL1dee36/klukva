@@ -756,6 +756,22 @@
           <div class="hierarchy-children-list" id="hierarchyChildrenList"></div>
         </div>
 
+        <!-- Checklist Section (visible only when checklists_enabled) -->
+        <div class="jira-section checklist-section" id="taskChecklistSection" style="display: none;">
+          <div class="links-header">
+            <div>
+              <label class="jira-section-label" style="margin: 0;">Чек-лист</label>
+              <span class="hierarchy-summary" id="taskChecklistSummary">0/0</span>
+            </div>
+          </div>
+          <div class="hierarchy-progress-track" style="margin: 8px 0 10px;"><div class="hierarchy-progress-fill" id="taskChecklistProgressBar" style="width: 0%;"></div></div>
+          <div class="checklist-items-list" id="taskChecklistItems"></div>
+          <form id="formAddChecklistItem" class="checklist-add-form">
+            <input type="text" id="inputChecklistText" class="form-control input-sm" placeholder="Добавить пункт чек-листа..." maxlength="300" required>
+            <button type="submit" class="btn btn-secondary btn-sm">+ Добавить</button>
+          </form>
+        </div>
+
         <!-- Links Section -->
         <div class="jira-section links-section">
           <div class="links-header">
@@ -1395,6 +1411,16 @@
               <label class="sys-update-token-check">
                 <input type="checkbox" id="chkArchiveEnabled">
                 <span id="lblArchiveEnabledState">Выключено</span>
+              </label>
+            </div>
+            <div class="settings-row" style="margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border-subtle);">
+              <div class="settings-row-info">
+                <span class="settings-row-label">Чек-листы внутри задачи</span>
+                <span class="settings-row-desc">Добавляет лёгкие списки пунктов с галочками и прогресс-баром в карточку задачи (по умолчанию выключено)</span>
+              </div>
+              <label class="sys-update-token-check">
+                <input type="checkbox" id="chkChecklistsEnabled">
+                <span id="lblChecklistsEnabledState">Выключено</span>
               </label>
             </div>
             <div class="settings-row" style="margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border-subtle);">

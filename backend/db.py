@@ -58,6 +58,7 @@ DEFAULT_DB: Dict[str, Any] = {
         "tempo_daily_hours": 8,
         "tempo_workdays": 5,
         "archive_enabled": False,
+        "checklists_enabled": False,
     },
 }
 
@@ -1378,6 +1379,9 @@ class JSONDatabase:
                 t["children_done"] = 0
             t["time_spent_minutes"] = worklog_mins_by_task.get(tid, 0)
             t["worklogs_count"] = worklog_cnt_by_task.get(tid, 0)
+            cl_items = t.get("checklist") or []
+            t["checklist_total"] = len(cl_items)
+            t["checklist_done"] = sum(1 for x in cl_items if x.get("done"))
 
     def get_task_hierarchy_children(self, task_id: int) -> Dict[str, List[Dict[str, Any]]]:
         with _lock:
@@ -2211,6 +2215,7 @@ class JSONDatabase:
                 "tempo_daily_hours": int(settings.get("tempo_daily_hours", 8) or 8),
                 "tempo_workdays": int(settings.get("tempo_workdays", 5) or 5),
                 "archive_enabled": bool(settings.get("archive_enabled", False)),
+                "checklists_enabled": bool(settings.get("checklists_enabled", False)),
             }
 
     def update_system_settings(self, updates: Dict[str, Any]) -> Dict[str, Any]:
@@ -2221,6 +2226,7 @@ class JSONDatabase:
                 "tempo_daily_hours": 8,
                 "tempo_workdays": 5,
                 "archive_enabled": False,
+                "checklists_enabled": False,
             })
             if "tempo_enabled" in updates:
                 settings["tempo_enabled"] = bool(updates["tempo_enabled"])
@@ -2230,13 +2236,63 @@ class JSONDatabase:
                 settings["tempo_workdays"] = max(1, min(7, int(updates["tempo_workdays"])))
             if "archive_enabled" in updates:
                 settings["archive_enabled"] = bool(updates["archive_enabled"])
+            if "checklists_enabled" in updates:
+                settings["checklists_enabled"] = bool(updates["checklists_enabled"])
             self._atomic_write(data)
             return {
                 "tempo_enabled": bool(settings.get("tempo_enabled", False)),
                 "tempo_daily_hours": int(settings.get("tempo_daily_hours", 8) or 8),
                 "tempo_workdays": int(settings.get("tempo_workdays", 5) or 5),
                 "archive_enabled": bool(settings.get("archive_enabled", False)),
+                "checklists_enabled": bool(settings.get("checklists_enabled", False)),
             }
+
+    def add_checklist_item(self, task_id: int, text: str) -> Optional[Dict[str, Any]]:
+        with _lock:
+            data = self._read_data()
+            task = next((t for t in data.get("tasks", []) if t["id"] == task_id), None)
+            if not task:
+                return None
+            cl = task.setdefault("checklist", [])
+            next_id = max((int(i.get("id") or 0) for i in cl), default=0) + 1
+            item = {"id": next_id, "text": text.strip()[:300], "done": False}
+            cl.append(item)
+            task["updated_at"] = datetime.utcnow().isoformat() + "Z"
+            self._atomic_write(data)
+            self._enrich_tasks(data, [task])
+            return task
+
+    def update_checklist_item(self, task_id: int, item_id: int, done: Optional[bool] = None, text: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        with _lock:
+            data = self._read_data()
+            task = next((t for t in data.get("tasks", []) if t["id"] == task_id), None)
+            if not task:
+                return None
+            cl = task.get("checklist") or []
+            item = next((i for i in cl if i.get("id") == item_id), None)
+            if not item:
+                return None
+            if done is not None:
+                item["done"] = bool(done)
+            if text is not None and text.strip():
+                item["text"] = text.strip()[:300]
+            task["updated_at"] = datetime.utcnow().isoformat() + "Z"
+            self._atomic_write(data)
+            self._enrich_tasks(data, [task])
+            return task
+
+    def delete_checklist_item(self, task_id: int, item_id: int) -> Optional[Dict[str, Any]]:
+        with _lock:
+            data = self._read_data()
+            task = next((t for t in data.get("tasks", []) if t["id"] == task_id), None)
+            if not task:
+                return None
+            cl = task.get("checklist") or []
+            task["checklist"] = [i for i in cl if i.get("id") != item_id]
+            task["updated_at"] = datetime.utcnow().isoformat() + "Z"
+            self._atomic_write(data)
+            self._enrich_tasks(data, [task])
+            return task
 
     def get_archived_tasks(self) -> List[Dict[str, Any]]:
         with _lock:
