@@ -758,18 +758,24 @@
 
         <!-- Checklist Section (visible only when checklists_enabled) -->
         <div class="jira-section checklist-section" id="taskChecklistSection" style="display: none;">
-          <div class="links-header">
-            <div>
-              <label class="jira-section-label" style="margin: 0;">Чек-лист</label>
-              <span class="hierarchy-summary" id="taskChecklistSummary">0/0</span>
-            </div>
+          <div id="taskChecklistCreateWrap" style="display: none;">
+            <button type="button" class="btn btn-secondary btn-sm" id="btnInitTaskChecklist">+ Создать чек-лист</button>
           </div>
-          <div class="hierarchy-progress-track" style="margin: 8px 0 10px;"><div class="hierarchy-progress-fill" id="taskChecklistProgressBar" style="width: 0%;"></div></div>
-          <div class="checklist-items-list" id="taskChecklistItems"></div>
-          <form id="formAddChecklistItem" class="checklist-add-form">
-            <input type="text" id="inputChecklistText" class="form-control input-sm" placeholder="Добавить пункт чек-листа..." maxlength="300" required>
-            <button type="submit" class="btn btn-secondary btn-sm">+ Добавить</button>
-          </form>
+          <div id="taskChecklistBody" style="display: none;">
+            <div class="links-header">
+              <div>
+                <label class="jira-section-label" style="margin: 0;">Чек-лист</label>
+                <span class="hierarchy-summary" id="taskChecklistSummary">0/0</span>
+              </div>
+              <button type="button" class="btn btn-ghost btn-sm" id="btnRemoveTaskChecklist" title="Удалить чек-лист" style="color: var(--text-muted);">Удалить чек-лист</button>
+            </div>
+            <div class="hierarchy-progress-track" style="margin: 8px 0 10px;"><div class="hierarchy-progress-fill" id="taskChecklistProgressBar" style="width: 0%;"></div></div>
+            <div class="checklist-items-list" id="taskChecklistItems"></div>
+            <form id="formAddChecklistItem" class="checklist-add-form">
+              <input type="text" id="inputChecklistText" class="form-control input-sm" placeholder="Добавить пункт чек-листа..." maxlength="300" required>
+              <button type="submit" class="btn btn-secondary btn-sm">+ Добавить</button>
+            </form>
+          </div>
         </div>
 
         <!-- Links Section -->

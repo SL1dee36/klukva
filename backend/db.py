@@ -2259,6 +2259,31 @@ class JSONDatabase:
                 "wip_limit_inprog": int(settings.get("wip_limit_inprog", 3) or 3),
             }
 
+    def init_checklist(self, task_id: int) -> Optional[Dict[str, Any]]:
+        with _lock:
+            data = self._read_data()
+            task = next((t for t in data.get("tasks", []) if t["id"] == task_id), None)
+            if not task:
+                return None
+            if not isinstance(task.get("checklist"), list):
+                task["checklist"] = []
+                task["updated_at"] = datetime.utcnow().isoformat() + "Z"
+                self._atomic_write(data)
+            self._enrich_tasks(data, [task])
+            return task
+
+    def remove_checklist(self, task_id: int) -> Optional[Dict[str, Any]]:
+        with _lock:
+            data = self._read_data()
+            task = next((t for t in data.get("tasks", []) if t["id"] == task_id), None)
+            if not task:
+                return None
+            task["checklist"] = None
+            task["updated_at"] = datetime.utcnow().isoformat() + "Z"
+            self._atomic_write(data)
+            self._enrich_tasks(data, [task])
+            return task
+
     def add_checklist_item(self, task_id: int, text: str) -> Optional[Dict[str, Any]]:
         with _lock:
             data = self._read_data()

@@ -1932,6 +1932,26 @@ def update_system_settings(
     return res
 
 
+@router.post("/tasks/{task_id}/checklist/init", status_code=201)
+def init_task_checklist(task_id: int, current_user: Dict = Depends(require_role("member"))):
+    if not db.get_system_settings().get("checklists_enabled"):
+        raise HTTPException(status_code=403, detail="Чек-листы отключены администратором")
+    task = db.init_checklist(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Задача не найдена")
+    return task
+
+
+@router.delete("/tasks/{task_id}/checklist")
+def remove_task_checklist(task_id: int, current_user: Dict = Depends(require_role("member"))):
+    if not db.get_system_settings().get("checklists_enabled"):
+        raise HTTPException(status_code=403, detail="Чек-листы отключены администратором")
+    task = db.remove_checklist(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Задача не найдена")
+    return task
+
+
 @router.post("/tasks/{task_id}/checklist", status_code=201)
 def add_task_checklist_item(
     task_id: int,

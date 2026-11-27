@@ -5989,6 +5989,31 @@ function setupChecklistListeners() {
     });
   }
 
+  document.getElementById("btnInitTaskChecklist")?.addEventListener("click", async () => {
+    if (!state.currentTaskDetail || !state.checklistsEnabled) return;
+    try {
+      const updated = await api(`/api/tasks/${state.currentTaskDetail.id}/checklist/init`, { method: "POST" });
+      state.currentTaskDetail = { ...state.currentTaskDetail, ...updated };
+      renderTaskChecklist(state.currentTaskDetail);
+      document.getElementById("inputChecklistText")?.focus();
+    } catch (err) {
+      showToast(`Ошибка: ${err.message}`);
+    }
+  });
+
+  document.getElementById("btnRemoveTaskChecklist")?.addEventListener("click", async () => {
+    if (!state.currentTaskDetail || !state.checklistsEnabled) return;
+    if (!confirm("Удалить чек-лист из этой задачи?")) return;
+    try {
+      const updated = await api(`/api/tasks/${state.currentTaskDetail.id}/checklist`, { method: "DELETE" });
+      state.currentTaskDetail = { ...state.currentTaskDetail, ...updated };
+      renderTaskChecklist(state.currentTaskDetail);
+      await loadTasks();
+    } catch (err) {
+      showToast(`Ошибка: ${err.message}`);
+    }
+  });
+
   document.getElementById("formAddChecklistItem")?.addEventListener("submit", async (e) => {
     e.preventDefault();
     if (!state.currentTaskDetail || !state.checklistsEnabled) return;
@@ -6012,6 +6037,8 @@ function setupChecklistListeners() {
 
 function renderTaskChecklist(task) {
   const sec = document.getElementById("taskChecklistSection");
+  const createWrap = document.getElementById("taskChecklistCreateWrap");
+  const bodyWrap = document.getElementById("taskChecklistBody");
   const sumEl = document.getElementById("taskChecklistSummary");
   const barEl = document.getElementById("taskChecklistProgressBar");
   const listEl = document.getElementById("taskChecklistItems");
@@ -6023,7 +6050,17 @@ function renderTaskChecklist(task) {
   }
   sec.style.display = "block";
 
-  const items = task.checklist || [];
+  const hasChecklist = Array.isArray(task.checklist);
+  if (!hasChecklist) {
+    if (createWrap) createWrap.style.display = "block";
+    if (bodyWrap) bodyWrap.style.display = "none";
+    return;
+  }
+
+  if (createWrap) createWrap.style.display = "none";
+  if (bodyWrap) bodyWrap.style.display = "block";
+
+  const items = task.checklist;
   const total = items.length;
   const done = items.filter(i => i.done).length;
   const pct = total ? Math.round((done / total) * 100) : 0;
