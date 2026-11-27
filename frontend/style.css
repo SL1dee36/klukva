@@ -6758,3 +6758,63 @@ input[type="checkbox"]:indeterminate::before {
   clip-path: none;
   border-radius: 1px;
 }
+
+/* ==========================================================================
+   THEMED DROPDOWN SELECTS (v2.8.2)
+   ========================================================================== */
+:root {
+  color-scheme: light;
+}
+
+[data-theme="dark"] {
+  color-scheme: dark;
+}
+
+select.form-control,
+select.select-sm {
+  -webkit-appearance: none;
+  appearance: none;
+  padding-right: 28px !important;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 9px center;
+  background-size: 12px 12px;
+  background-color: var(--bg-surface);
+  color: var(--text-main);
+  border-color: var(--border-default);
+  cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease;
+}
+
+[data-theme="dark"] select.form-control,
+[data-theme="dark"] select.select-sm {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+  background-color: var(--bg-surface);
+  color: var(--text-main);
+}
+
+select.form-control:hover,
+select.select-sm:hover {
+  border-color: var(--border-strong);
+}
+
+select.form-control:focus,
+select.select-sm:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-subtle);
+}
+
+[data-style="remaster"] select.form-control,
+[data-style="remaster"] select.select-sm {
+  border-radius: var(--radius-md);
+  background-color: var(--bg-card);
+}
+
+select.form-control option,
+select.select-sm option,
+select.form-control optgroup,
+select.select-sm optgroup {
+  background-color: var(--bg-surface);
+  color: var(--text-main);
+}
