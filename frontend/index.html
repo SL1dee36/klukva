@@ -488,31 +488,44 @@
       </section>
 
       <!-- ================================================================
-           4.5. TEMPO / TIME TRACKING VIEW (OPTIONAL, ADMIN TOGGLED)
+           4.5. TEMPO / PERSONAL CALENDAR & TIMESHEET VIEW
            ================================================================ -->
       <section class="view-section" id="viewTempo">
-        <div class="toolbar analytics-toolbar">
-          <div class="sprint-view-controls">
-            <span class="panel-title">Tempo — учёт рабочего времени</span>
-            <div class="analytics-range-presets" id="tempoRangePresets">
-              <button type="button" class="btn btn-secondary btn-sm tempo-preset-btn" data-days="7">7 дн</button>
-              <button type="button" class="btn btn-secondary btn-sm tempo-preset-btn active" data-days="14">14 дн</button>
-              <button type="button" class="btn btn-secondary btn-sm tempo-preset-btn" data-days="30">30 дн</button>
+        <div class="tempo-topbar">
+          <div class="tempo-topbar-left">
+            <div class="tempo-user-pill" id="tempoUserPill">
+              <span class="user-avatar" id="tempoUserAvatar"></span>
+              <span class="tempo-user-name" id="tempoUserName">Пользователь</span>
             </div>
-          </div>
-          <div class="header-actions analytics-range-controls">
-            <select id="tempoUserFilter" class="form-control select-sm" style="width: auto; max-width: 180px;">
-              <option value="">Все сотрудники</option>
+            <select id="tempoUserFilter" class="form-control select-sm" style="width: auto; max-width: 180px; display: none;" title="Просмотр табеля сотрудника">
             </select>
-            <label class="analytics-date-label">С <input type="date" id="tempoDateFrom" class="form-control input-sm"></label>
-            <label class="analytics-date-label">По <input type="date" id="tempoDateTo" class="form-control input-sm"></label>
-            <button type="button" class="btn btn-primary btn-sm" id="btnApplyTempoRange">Показать</button>
-            <button type="button" class="btn btn-secondary btn-sm" id="btnExportTempoCsv" title="Скачать табель Tempo в CSV">CSV</button>
+            <button type="button" class="btn btn-secondary btn-sm" id="btnTempoToday">Сегодня</button>
+          </div>
+          <div class="tempo-week-nav">
+            <button type="button" class="btn btn-ghost btn-sm" id="btnTempoPrevWeek" title="Предыдущая неделя">&lsaquo;</button>
+            <div class="tempo-week-label-wrap">
+              <div class="tempo-week-range" id="tempoWeekRangeLabel">—</div>
+              <div class="tempo-week-total" id="tempoWeekTotalLabel">0м / 40ч</div>
+            </div>
+            <button type="button" class="btn btn-ghost btn-sm" id="btnTempoNextWeek" title="Следующая неделя">&rsaquo;</button>
+          </div>
+          <div class="tempo-topbar-right">
+            <button type="button" class="btn btn-primary btn-sm" id="btnTempoOpenLogModal">+ Запись</button>
+            <button type="button" class="btn btn-secondary btn-sm" id="btnExportTempoCsv" title="Скачать табель недели в CSV">CSV</button>
           </div>
         </div>
-        <div class="analytics-container p-16" id="tempoContainer">
-          <div class="analytics-kpi-grid" id="tempoKpiGrid"></div>
-          <div class="analytics-charts-grid" id="tempoChartsGrid"></div>
+
+        <div class="tempo-workspace">
+          <div class="tempo-calendar-grid" id="tempoCalendarGrid"></div>
+          <aside class="tempo-issues-sidebar">
+            <div class="tempo-issues-header">
+              <span class="tempo-issues-title">Запросы</span>
+            </div>
+            <div class="tempo-issues-search-wrap">
+              <input type="text" id="tempoIssuesSearch" class="form-control input-sm" placeholder="Поиск по ключу или названию...">
+            </div>
+            <div class="tempo-issues-list" id="tempoIssuesList"></div>
+          </aside>
         </div>
       </section>
 
@@ -722,30 +735,6 @@
           <div class="attachment-preview" id="attachmentPreview" style="display: none;"></div>
         </div>
 
-        <!-- Tempo Worklog Section (visible only when Tempo is enabled) -->
-        <div class="jira-section tempo-section" id="tempoTaskSection" style="display: none;">
-          <div class="links-header">
-            <div>
-              <label class="jira-section-label" style="margin: 0;">Учёт времени (Tempo)</label>
-              <span class="hierarchy-summary" id="taskTempoTotal">0м</span>
-            </div>
-            <div class="tempo-quick-btns">
-              <button type="button" class="btn btn-secondary btn-sm tempo-quick-add" data-mins="15">+15м</button>
-              <button type="button" class="btn btn-secondary btn-sm tempo-quick-add" data-mins="30">+30м</button>
-              <button type="button" class="btn btn-secondary btn-sm tempo-quick-add" data-mins="60">+1ч</button>
-              <button type="button" class="btn btn-secondary btn-sm tempo-quick-add" data-mins="120">+2ч</button>
-            </div>
-          </div>
-          <form id="formLogWork" class="tempo-log-form">
-            <input type="number" id="inputTempoHours" class="form-control input-sm" placeholder="Часы" min="0" max="100" step="1" style="width: 74px;">
-            <input type="number" id="inputTempoMins" class="form-control input-sm" placeholder="Мин" min="0" max="59" step="5" style="width: 74px;">
-            <input type="date" id="inputTempoDate" class="form-control input-sm" style="width: 136px;">
-            <input type="text" id="inputTempoComment" class="form-control input-sm" placeholder="Комментарий к списанию (необязательно)" style="flex: 1; min-width: 140px;">
-            <button type="submit" class="btn btn-primary btn-sm">Списать</button>
-          </form>
-          <div class="tempo-worklogs-list" id="taskWorklogsList"></div>
-        </div>
-
         <!-- Comments Section -->
         <div class="jira-section comments-section">
           <label class="jira-section-label">Комментарии и обсуждение</label>
@@ -872,6 +861,11 @@
           <div class="meta-field">
             <span class="meta-label">Обновлено</span>
             <div class="meta-value" id="detailUpdatedAt">—</div>
+          </div>
+
+          <div class="meta-field" id="detailTempoRow" style="display: none;">
+            <span class="meta-label">Затрачено<br><span class="meta-sublabel">Tempo</span></span>
+            <div class="meta-value" id="detailTempoValue">0м</div>
           </div>
         </div>
       </aside>
@@ -1517,6 +1511,46 @@
         <div class="modal-footer">
           <button type="button" class="btn btn-secondary" id="btnCancelSprintModal2">Отмена</button>
           <button type="submit" class="btn btn-primary" id="btnSubmitSprint">Начать спринт</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- =========================================================================
+       MODAL: TEMPO LOG WORK
+       ========================================================================= -->
+  <div class="modal-overlay" id="modalTempoLog" style="display: none;">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3 class="modal-title">Запись о работе (Tempo)</h3>
+        <button type="button" class="btn-close-modal" id="btnCloseTempoModal">&times;</button>
+      </div>
+      <form id="formTempoModal">
+        <div class="form-group">
+          <label for="tempoModalTaskSelect">Задача *</label>
+          <select id="tempoModalTaskSelect" class="form-control" required></select>
+        </div>
+        <div class="form-row">
+          <div class="form-group flex-1">
+            <label for="tempoModalDate">Дата *</label>
+            <input type="date" id="tempoModalDate" class="form-control" required>
+          </div>
+          <div class="form-group" style="width: 100px;">
+            <label for="tempoModalHours">Часы</label>
+            <input type="number" id="tempoModalHours" class="form-control" min="0" max="24" value="1">
+          </div>
+          <div class="form-group" style="width: 100px;">
+            <label for="tempoModalMins">Минуты</label>
+            <input type="number" id="tempoModalMins" class="form-control" min="0" max="59" step="5" value="0">
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="tempoModalComment">Описание работы</label>
+          <input type="text" id="tempoModalComment" class="form-control" placeholder="Что было сделано...">
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" id="btnCancelTempoModal">Отмена</button>
+          <button type="submit" class="btn btn-primary">Записать время</button>
         </div>
       </form>
     </div>

@@ -88,7 +88,8 @@ const state = {
   boardHideEmptyLanes: localStorage.getItem("klukva_board_hide_empty") === "1",
   selectedBacklogIds: new Set(),
   tempoEnabled: false,
-  tempoRange: { days: 14, dateFrom: "", dateTo: "" },
+  tempoWeekStart: null,
+  tempoSelectedUser: null,
   lastTempoData: null,
   currentTaskDetail: null,
   taskDrawerMode: false,
@@ -5140,7 +5141,7 @@ async function loadSystemUsers() {
 
 
 // ============================================================================
-// TEMPO (УЧЁТ РАБОЧЕГО ВРЕМЕНИ, ВКЛЮЧАЕТСЯ АДМИНИСТРАЦИЕЙ)
+// TEMPO (ПЕРСОНАЛЬНЫЙ КАЛЕНДАРЬ УЧЁТА ВРЕМЕНИ, ВКЛЮЧАЕТСЯ АДМИНИСТРАЦИЕЙ)
 // ============================================================================
 function formatMinutesCompact(mins) {
   const m = Math.max(0, Math.round(Number(mins || 0)));
@@ -5152,15 +5153,30 @@ function formatMinutesCompact(mins) {
   return `${rem}м`;
 }
 
+function getMondayOfWeek(d = new Date()) {
+  const copy = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  const day = copy.getDay(); // 0=Sun..6=Sat
+  const diff = (day === 0 ? -6 : 1 - day);
+  copy.setDate(copy.getDate() + diff);
+  return copy;
+}
+
+function toIsoDateLocal(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
 function applyTempoVisibility() {
   const enabled = Boolean(state.tempoEnabled);
   const tabTempo = document.getElementById("tabTempo");
-  const taskSec = document.getElementById("tempoTaskSection");
+  const detailRow = document.getElementById("detailTempoRow");
   const chk = document.getElementById("chkTempoEnabled");
   const lbl = document.getElementById("lblTempoEnabledState");
 
   if (tabTempo) tabTempo.style.display = enabled ? "inline-flex" : "none";
-  if (taskSec) taskSec.style.display = enabled ? "block" : "none";
+  if (detailRow && !enabled) detailRow.style.display = "none";
   if (chk) chk.checked = enabled;
   if (lbl) lbl.textContent = enabled ? "Включено" : "Выключено";
 
@@ -5177,6 +5193,39 @@ async function loadSystemSettings() {
     state.tempoEnabled = false;
   }
   applyTempoVisibility();
+}
+
+function openTempoLogModal(defaultDate = null, defaultTaskId = null) {
+  if (!state.tempoEnabled) return;
+  const modal = document.getElementById("modalTempoLog");
+  const taskSel = document.getElementById("tempoModalTaskSelect");
+  const dateInp = document.getElementById("tempoModalDate");
+  const hrsInp = document.getElementById("tempoModalHours");
+  const minInp = document.getElementById("tempoModalMins");
+  const cmtInp = document.getElementById("tempoModalComment");
+  if (!modal || !taskSel) return;
+
+  const tasksList = state.allTasksForHierarchy || state.tasks || [];
+  taskSel.innerHTML = "";
+  tasksList.forEach(t => {
+    const opt = document.createElement("option");
+    opt.value = String(t.id);
+    opt.textContent = `${t.key} — ${t.title}`;
+    taskSel.appendChild(opt);
+  });
+
+  if (defaultTaskId) taskSel.value = String(defaultTaskId);
+  if (dateInp) dateInp.value = defaultDate || toIsoDateLocal(new Date());
+  if (hrsInp) hrsInp.value = "1";
+  if (minInp) minInp.value = "0";
+  if (cmtInp) cmtInp.value = "";
+
+  modal.style.display = "flex";
+}
+
+function closeTempoLogModal() {
+  const modal = document.getElementById("modalTempoLog");
+  if (modal) modal.style.display = "none";
 }
 
 function setupTempoListeners() {
@@ -5202,261 +5251,296 @@ function setupTempoListeners() {
     });
   }
 
-  document.querySelectorAll(".tempo-quick-add").forEach(btn => {
-    btn.addEventListener("click", async () => {
-      if (!state.currentTaskDetail || !state.tempoEnabled) return;
-      const mins = parseInt(btn.dataset.mins, 10) || 0;
-      if (mins <= 0) return;
-      const dateVal = document.getElementById("inputTempoDate")?.value || new Date().toISOString().slice(0, 10);
-      try {
-        await api(`/api/tasks/${state.currentTaskDetail.id}/worklogs`, {
-          method: "POST",
-          body: JSON.stringify({ minutes: mins, work_date: dateVal, comment: "" })
-        });
-        showToast(`Списано ${formatMinutesCompact(mins)}`);
-        await loadTaskWorklogs(state.currentTaskDetail.id);
-      } catch (err) {
-        showToast(`Ошибка: ${err.message}`);
-      }
-    });
-  });
-
-  const formLog = document.getElementById("formLogWork");
-  if (formLog) {
-    formLog.addEventListener("submit", async (e) => {
-      e.preventDefault();
-      if (!state.currentTaskDetail || !state.tempoEnabled) return;
-      const h = parseInt(document.getElementById("inputTempoHours")?.value || "0", 10) || 0;
-      const m = parseInt(document.getElementById("inputTempoMins")?.value || "0", 10) || 0;
-      const totalMins = h * 60 + m;
-      if (totalMins <= 0) {
-        showToast("Укажите часы или минуты");
-        return;
-      }
-      const work_date = document.getElementById("inputTempoDate")?.value || new Date().toISOString().slice(0, 10);
-      const comment = document.getElementById("inputTempoComment")?.value.trim() || "";
-      try {
-        await api(`/api/tasks/${state.currentTaskDetail.id}/worklogs`, {
-          method: "POST",
-          body: JSON.stringify({ minutes: totalMins, work_date, comment })
-        });
-        document.getElementById("inputTempoHours").value = "";
-        document.getElementById("inputTempoMins").value = "";
-        document.getElementById("inputTempoComment").value = "";
-        showToast(`Списано ${formatMinutesCompact(totalMins)}`);
-        await loadTaskWorklogs(state.currentTaskDetail.id);
-      } catch (err) {
-        showToast(`Ошибка: ${err.message}`);
-      }
-    });
-  }
-
-  document.querySelectorAll(".tempo-preset-btn").forEach(btn => {
-    btn.addEventListener("click", () => {
-      const days = parseInt(btn.dataset.days, 10) || 14;
-      const end = new Date();
-      const start = new Date();
-      start.setDate(end.getDate() - (days - 1));
-      state.tempoRange = {
-        days,
-        dateFrom: start.toISOString().slice(0, 10),
-        dateTo: end.toISOString().slice(0, 10),
-      };
-      document.querySelectorAll(".tempo-preset-btn").forEach(b => b.classList.toggle("active", b === btn));
-      loadTempoView();
-    });
-  });
-
-  document.getElementById("btnApplyTempoRange")?.addEventListener("click", () => {
-    const df = document.getElementById("tempoDateFrom")?.value || "";
-    const dt = document.getElementById("tempoDateTo")?.value || "";
-    state.tempoRange = { days: null, dateFrom: df, dateTo: dt };
-    document.querySelectorAll(".tempo-preset-btn").forEach(b => b.classList.remove("active"));
+  document.getElementById("btnTempoToday")?.addEventListener("click", () => {
+    state.tempoWeekStart = toIsoDateLocal(getMondayOfWeek(new Date()));
     loadTempoView();
   });
 
-  document.getElementById("tempoUserFilter")?.addEventListener("change", loadTempoView);
+  document.getElementById("btnTempoPrevWeek")?.addEventListener("click", () => {
+    const base = state.tempoWeekStart ? new Date(state.tempoWeekStart + "T00:00:00") : getMondayOfWeek(new Date());
+    base.setDate(base.getDate() - 7);
+    state.tempoWeekStart = toIsoDateLocal(base);
+    loadTempoView();
+  });
+
+  document.getElementById("btnTempoNextWeek")?.addEventListener("click", () => {
+    const base = state.tempoWeekStart ? new Date(state.tempoWeekStart + "T00:00:00") : getMondayOfWeek(new Date());
+    base.setDate(base.getDate() + 7);
+    state.tempoWeekStart = toIsoDateLocal(base);
+    loadTempoView();
+  });
+
+  document.getElementById("tempoUserFilter")?.addEventListener("change", (e) => {
+    state.tempoSelectedUser = e.target.value || state.currentUser?.username || null;
+    loadTempoView();
+  });
+
+  document.getElementById("tempoIssuesSearch")?.addEventListener("input", debounce(renderTempoIssuesSidebar, 150));
+  document.getElementById("btnTempoOpenLogModal")?.addEventListener("click", () => openTempoLogModal());
+  document.getElementById("btnCloseTempoModal")?.addEventListener("click", closeTempoLogModal);
+  document.getElementById("btnCancelTempoModal")?.addEventListener("click", closeTempoLogModal);
   document.getElementById("btnExportTempoCsv")?.addEventListener("click", exportTempoCsv);
+
+  document.getElementById("formTempoModal")?.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const taskId = parseInt(document.getElementById("tempoModalTaskSelect")?.value || "0", 10);
+    const work_date = document.getElementById("tempoModalDate")?.value || toIsoDateLocal(new Date());
+    const h = parseInt(document.getElementById("tempoModalHours")?.value || "0", 10) || 0;
+    const m = parseInt(document.getElementById("tempoModalMins")?.value || "0", 10) || 0;
+    const comment = document.getElementById("tempoModalComment")?.value.trim() || "";
+    const totalMins = h * 60 + m;
+    if (!taskId || totalMins <= 0) {
+      showToast("Выберите задачу и укажите время");
+      return;
+    }
+    try {
+      await api(`/api/tasks/${taskId}/worklogs`, {
+        method: "POST",
+        body: JSON.stringify({ minutes: totalMins, work_date, comment })
+      });
+      closeTempoLogModal();
+      showToast(`Списано ${formatMinutesCompact(totalMins)}`);
+      await loadTempoView();
+    } catch (err) {
+      showToast(`Ошибка: ${err.message}`);
+    }
+  });
 }
 
 async function loadTaskWorklogs(taskId) {
-  const sec = document.getElementById("tempoTaskSection");
-  const listEl = document.getElementById("taskWorklogsList");
-  const totalEl = document.getElementById("taskTempoTotal");
-  const dateInput = document.getElementById("inputTempoDate");
-  if (dateInput && !dateInput.value) {
-    dateInput.value = new Date().toISOString().slice(0, 10);
-  }
+  const rowEl = document.getElementById("detailTempoRow");
+  const valEl = document.getElementById("detailTempoValue");
+  if (!rowEl || !valEl) return;
   if (!state.tempoEnabled) {
-    if (sec) sec.style.display = "none";
+    rowEl.style.display = "none";
     return;
   }
-  if (sec) sec.style.display = "block";
-  if (!listEl) return;
-
+  rowEl.style.display = "flex";
   try {
     const items = await api(`/api/tasks/${taskId}/worklogs`);
-    const totalMins = items.reduce((acc, w) => acc + Number(w.minutes || 0), 0);
-    if (totalEl) totalEl.textContent = `Всего: ${formatMinutesCompact(totalMins)}`;
-
     if (!items.length) {
-      listEl.innerHTML = '<div class="links-empty">Время по задаче ещё не списывалось</div>';
+      valEl.textContent = "0м";
       return;
     }
-
-    const canManage = hasMinRole("manager");
-    const myName = (state.currentUser?.username || "").toLowerCase();
-    listEl.innerHTML = "";
+    const totalMins = items.reduce((acc, w) => acc + Number(w.minutes || 0), 0);
+    const byUser = {};
     items.forEach(w => {
-      const row = document.createElement("div");
-      row.className = "tempo-worklog-row";
-      const canDel = canManage || (w.username || "").toLowerCase() === myName;
-      row.innerHTML = `
-        <div class="tempo-worklog-main">
-          <span class="tempo-time-pill">${formatMinutesCompact(w.minutes)}</span>
-          <b>${escapeHtml(w.display_name || w.username)}</b>
-          <span class="tempo-worklog-date">${escapeHtml(w.work_date || "")}</span>
-          ${w.comment ? `<span class="tempo-worklog-comment">— ${escapeHtml(w.comment)}</span>` : ""}
-        </div>
-        ${canDel ? '<button type="button" class="btn-link-del" title="Удалить запись">&times;</button>' : ""}
-      `;
-      const delBtn = row.querySelector(".btn-link-del");
-      if (delBtn) {
-        delBtn.addEventListener("click", async () => {
-          try {
-            await api(`/api/worklogs/${w.id}`, { method: "DELETE" });
-            showToast("Запись времени удалена");
-            await loadTaskWorklogs(taskId);
-          } catch (err) {
-            showToast(err.message);
-          }
-        });
-      }
-      listEl.appendChild(row);
+      const name = w.display_name || w.username;
+      byUser[name] = (byUser[name] || 0) + Number(w.minutes || 0);
     });
+    const breakdown = Object.entries(byUser)
+      .map(([name, mins]) => `${escapeHtml(name)}: ${formatMinutesCompact(mins)}`)
+      .join(", ");
+    valEl.innerHTML = `<b>${formatMinutesCompact(totalMins)}</b><div class="tempo-detail-breakdown">${breakdown}</div>`;
   } catch (err) {
-    listEl.innerHTML = `<div class="links-empty">${escapeHtml(err.message)}</div>`;
+    valEl.textContent = "—";
   }
+}
+
+function renderTempoIssuesSidebar() {
+  const listEl = document.getElementById("tempoIssuesList");
+  if (!listEl) return;
+  const q = (document.getElementById("tempoIssuesSearch")?.value || "").trim().toLowerCase();
+  const pool = state.allTasksForHierarchy || state.tasks || [];
+  const filtered = q
+    ? pool.filter(t => (t.key || "").toLowerCase().includes(q) || (t.title || "").toLowerCase().includes(q))
+    : pool;
+
+  if (!filtered.length) {
+    listEl.innerHTML = '<div class="links-empty" style="padding: 12px;">Задачи не найдены</div>';
+    return;
+  }
+
+  listEl.innerHTML = "";
+  filtered.slice(0, 80).forEach(t => {
+    const card = document.createElement("div");
+    card.className = "tempo-issue-card";
+    card.draggable = true;
+    card.dataset.taskId = String(t.id);
+    card.innerHTML = `
+      <div class="tempo-issue-title">${escapeHtml(t.title)}</div>
+      <div class="tempo-issue-meta">
+        ${renderTypeBadge(t.task_type)}
+        <span class="tempo-issue-key">${escapeHtml(t.key)}</span>
+      </div>
+    `;
+    card.addEventListener("dragstart", (e) => {
+      e.dataTransfer.setData("text/tempo-task-id", String(t.id));
+      e.dataTransfer.effectAllowed = "copy";
+    });
+    card.addEventListener("click", () => openTempoLogModal(null, t.id));
+    listEl.appendChild(card);
+  });
 }
 
 async function loadTempoView() {
   if (!state.tempoEnabled) return;
-  const kpiEl = document.getElementById("tempoKpiGrid");
-  const chartsEl = document.getElementById("tempoChartsGrid");
-  if (!kpiEl || !chartsEl) return;
+  const gridEl = document.getElementById("tempoCalendarGrid");
+  if (!gridEl) return;
+
+  if (!state.allTasksForHierarchy) {
+    await loadHierarchyContainers().catch(() => {});
+  }
+
+  const monday = state.tempoWeekStart
+    ? new Date(state.tempoWeekStart + "T00:00:00")
+    : getMondayOfWeek(new Date());
+  state.tempoWeekStart = toIsoDateLocal(monday);
+
+  const sunday = new Date(monday);
+  sunday.setDate(monday.getDate() + 6);
+  const df = toIsoDateLocal(monday);
+  const dt = toIsoDateLocal(sunday);
+
+  // Determine target user (each user sees their own Tempo by default)
+  const myUsername = state.currentUser?.username || "";
+  if (!state.tempoSelectedUser) state.tempoSelectedUser = myUsername;
+
+  const userSel = document.getElementById("tempoUserFilter");
+  if (userSel) {
+    if (hasMinRole("manager") && state.users.length > 1) {
+      userSel.style.display = "inline-block";
+      if (!userSel.options.length || userSel.options[0].value === "") {
+        userSel.innerHTML = state.users.map(u => `<option value="${escapeHtml(u.username)}">${escapeHtml(u.display_name || u.username)}</option>`).join("");
+      }
+      userSel.value = state.tempoSelectedUser;
+    } else {
+      userSel.style.display = "none";
+    }
+  }
+
+  const targetUserObj = state.users.find(u => u.username.toLowerCase() === (state.tempoSelectedUser || "").toLowerCase()) || state.currentUser;
+  const nameEl = document.getElementById("tempoUserName");
+  const avatarEl = document.getElementById("tempoUserAvatar");
+  if (nameEl) nameEl.textContent = targetUserObj ? (targetUserObj.display_name || targetUserObj.username) : state.tempoSelectedUser;
+  if (avatarEl && targetUserObj) avatarEl.innerHTML = renderUserAvatarContent(targetUserObj);
+
+  const rangeEl = document.getElementById("tempoWeekRangeLabel");
+  if (rangeEl) {
+    const fmtShort = (d) => `${String(d.getDate()).padStart(2, "0")}.${String(d.getMonth() + 1).padStart(2, "0")}.${d.getFullYear()}`;
+    rangeEl.textContent = `${fmtShort(monday)} – ${fmtShort(sunday)}`;
+  }
+
+  renderTempoIssuesSidebar();
 
   try {
-    const params = new URLSearchParams();
-    if (state.tempoRange.dateFrom) params.set("date_from", state.tempoRange.dateFrom);
-    if (state.tempoRange.dateTo) params.set("date_to", state.tempoRange.dateTo);
-    const uFilter = document.getElementById("tempoUserFilter")?.value || "";
-    if (uFilter) params.set("username", uFilter);
-
-    const qs = params.toString();
-    const data = await api(`/api/tempo/worklogs${qs ? `?${qs}` : ""}`);
+    const params = new URLSearchParams({ date_from: df, date_to: dt });
+    if (state.tempoSelectedUser) params.set("username", state.tempoSelectedUser);
+    const data = await api(`/api/tempo/worklogs?${params.toString()}`);
     state.lastTempoData = data;
 
-    const dfEl = document.getElementById("tempoDateFrom");
-    const dtEl = document.getElementById("tempoDateTo");
-    if (dfEl && data.date_from) dfEl.value = data.date_from;
-    if (dtEl && data.date_to) dtEl.value = data.date_to;
+    const totalEl = document.getElementById("tempoWeekTotalLabel");
+    if (totalEl) totalEl.textContent = `${formatMinutesCompact(data.total_minutes || 0)} / 40ч`;
 
-    const totalH = (Number(data.total_minutes || 0) / 60).toFixed(1);
-    kpiEl.innerHTML = `
-      <div class="kpi-card">
-        <div class="kpi-label">Всего времени</div>
-        <div class="kpi-val">${formatMinutesCompact(data.total_minutes)}</div>
-        <div class="kpi-sub">${totalH} ч за период</div>
-      </div>
-      <div class="kpi-card">
-        <div class="kpi-label">Списаний</div>
-        <div class="kpi-val">${data.entries_count ?? 0}</div>
-        <div class="kpi-sub">${data.date_from} — ${data.date_to}</div>
-      </div>
-      <div class="kpi-card">
-        <div class="kpi-label">Сотрудников</div>
-        <div class="kpi-val">${(data.by_user || []).length}</div>
-        <div class="kpi-sub">Участвовало в учёте</div>
-      </div>
-      <div class="kpi-card">
-        <div class="kpi-label">Задач</div>
-        <div class="kpi-val">${(data.by_task || []).length}</div>
-        <div class="kpi-sub">Со списанным временем</div>
-      </div>
-    `;
+    const itemsByDay = {};
+    (data.items || []).forEach(w => {
+      const wd = (w.work_date || "").slice(0, 10);
+      itemsByDay[wd] = itemsByDay[wd] || [];
+      itemsByDay[wd].push(w);
+    });
 
-    const maxUserMin = Math.max(1, ...(data.by_user || []).map(u => u.minutes));
-    const userBars = (data.by_user || []).length
-      ? (data.by_user || []).map(u => {
-          const pct = Math.round((u.minutes / maxUserMin) * 100);
-          return `
-            <div class="chart-bar-row detailed">
-              <div class="chart-bar-label">${escapeHtml(u.display_name || u.username)}</div>
-              <div class="chart-bar-track"><div class="chart-bar-fill" style="width:${pct}%;background:var(--accent);"></div></div>
-              <div class="chart-bar-val">${formatMinutesCompact(u.minutes)} (${u.entries})</div>
-            </div>
-          `;
-        }).join("")
-      : '<div class="links-empty">Нет списаний за выбранный период</div>';
+    const dayNames = ["пн", "вт", "ср", "чт", "пт", "сб", "вс"];
+    const todayIso = toIsoDateLocal(new Date());
+    const canManage = hasMinRole("manager");
+    const viewingOwn = (state.tempoSelectedUser || "").toLowerCase() === myUsername.toLowerCase();
 
-    const maxTaskMin = Math.max(1, ...(data.by_task || []).map(t => t.minutes));
-    const taskBars = (data.by_task || []).length
-      ? (data.by_task || []).slice(0, 15).map(t => {
-          const pct = Math.round((t.minutes / maxTaskMin) * 100);
-          return `
-            <div class="chart-bar-row detailed">
-              <div class="chart-bar-label" style="cursor:pointer;" onclick="openTaskDetail(${t.task_id})" title="${escapeHtml(t.task_title)}">${escapeHtml(t.task_key)} — ${escapeHtml(t.task_title)}</div>
-              <div class="chart-bar-track"><div class="chart-bar-fill" style="width:${pct}%;background:#0284c7;"></div></div>
-              <div class="chart-bar-val">${formatMinutesCompact(t.minutes)}</div>
-            </div>
-          `;
-        }).join("")
-      : '<div class="links-empty">Нет задач со списанным временем</div>';
+    gridEl.innerHTML = "";
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(monday);
+      d.setDate(monday.getDate() + i);
+      const iso = toIsoDateLocal(d);
+      const isWeekend = i >= 5;
+      const targetMins = isWeekend ? 0 : 480;
+      const dayItems = (data.items || []).filter(w => (w.work_date || "").slice(0, 10) === iso);
+      const dayTotal = dayItems.reduce((acc, w) => acc + Number(w.minutes || 0), 0);
+      const pct = targetMins > 0 ? Math.min(100, Math.round((dayTotal / targetMins) * 100)) : (dayTotal > 0 ? 100 : 0);
 
-    const logRows = (data.items || []).map(w => `
-      <tr>
-        <td>${escapeHtml(w.work_date || "")}</td>
-        <td><span class="task-key-link" onclick="openTaskDetail(${w.task_id})">${escapeHtml(w.task_key)}</span></td>
-        <td class="task-title-cell" onclick="openTaskDetail(${w.task_id})">${escapeHtml(w.task_title)}</td>
-        <td>${escapeHtml(w.display_name || w.username)}</td>
-        <td class="num"><b>${formatMinutesCompact(w.minutes)}</b></td>
-        <td>${escapeHtml(w.comment || "—")}</td>
-      </tr>
-    `).join("");
+      const col = document.createElement("div");
+      col.className = `tempo-day-col ${iso === todayIso ? "is-today" : ""} ${isWeekend ? "is-weekend" : ""}`;
+      col.dataset.date = iso;
 
-    chartsEl.innerHTML = `
-      <div class="chart-card"><div class="chart-card-title">Время по сотрудникам</div>${userBars}</div>
-      <div class="chart-card"><div class="chart-card-title">Время по задачам</div>${taskBars}</div>
-      <div class="chart-card chart-card-full">
-        <div class="chart-card-title">Журнал списаний времени (Timesheet)</div>
-        ${(data.items || []).length ? `
-          <div class="analytics-table-wrap">
-            <table class="analytics-detail-table">
-              <thead>
-                <tr>
-                  <th>Дата</th>
-                  <th>Ключ</th>
-                  <th>Задача</th>
-                  <th>Сотрудник</th>
-                  <th class="num">Время</th>
-                  <th>Комментарий</th>
-                </tr>
-              </thead>
-              <tbody>${logRows}</tbody>
-            </table>
+      const ddMm = `${String(d.getDate()).padStart(2, "0")}.${String(d.getMonth() + 1).padStart(2, "0")}`;
+      col.innerHTML = `
+        <div class="tempo-day-header">
+          <div class="tempo-day-title-row">
+            <span class="tempo-day-name">${dayNames[i]} ${ddMm}</span>
+            <span class="tempo-day-hours">${formatMinutesCompact(dayTotal)} из ${isWeekend ? "0ч" : "8ч"}</span>
           </div>
-        ` : '<div class="links-empty">Записей за выбранный период нет</div>'}
-      </div>
-    `;
+          <div class="tempo-day-progress"><div class="tempo-day-progress-fill" style="width: ${pct}%;"></div></div>
+        </div>
+        <div class="tempo-day-sublabel">ЗАПИСИ О РАБОТЕ</div>
+        <div class="tempo-day-cards"></div>
+      `;
+
+      const cardsWrap = col.querySelector(".tempo-day-cards");
+      dayItems.forEach(w => {
+        const card = document.createElement("div");
+        card.className = "tempo-log-card";
+        const canDel = canManage || (w.username || "").toLowerCase() === myUsername.toLowerCase();
+        card.innerHTML = `
+          <div class="tempo-log-card-head">
+            <span class="tempo-log-card-title" title="${escapeHtml(w.task_title)}">${escapeHtml(w.task_title || w.task_key)}</span>
+            ${canDel ? '<button type="button" class="tempo-log-del" title="Удалить запись">&times;</button>' : ""}
+          </div>
+          <div class="tempo-log-card-comment">${escapeHtml(w.comment || `Работа над запросом ${w.task_key}`)}</div>
+          <div class="tempo-log-card-foot">
+            <span class="tempo-log-key">${escapeHtml(w.task_key)}</span>
+            <span class="tempo-log-dur">${formatMinutesCompact(w.minutes)}</span>
+          </div>
+        `;
+        card.querySelector(".tempo-log-card-title")?.addEventListener("click", () => openTaskDetail(w.task_id));
+        card.querySelector(".tempo-log-key")?.addEventListener("click", () => openTaskDetail(w.task_id));
+        card.querySelector(".tempo-log-del")?.addEventListener("click", async (e) => {
+          e.stopPropagation();
+          try {
+            await api(`/api/worklogs/${w.id}`, { method: "DELETE" });
+            showToast("Запись удалена");
+            await loadTempoView();
+          } catch (err) {
+            showToast(err.message);
+          }
+        });
+        cardsWrap.appendChild(card);
+      });
+
+      if (viewingOwn) {
+        const addBtn = document.createElement("button");
+        addBtn.type = "button";
+        addBtn.className = "tempo-day-add-btn";
+        addBtn.textContent = "+";
+        addBtn.title = `Добавить запись на ${ddMm}`;
+        addBtn.addEventListener("click", () => openTempoLogModal(iso));
+        cardsWrap.appendChild(addBtn);
+      }
+
+      // Drag-and-drop from right Issues sidebar
+      col.addEventListener("dragover", (e) => {
+        if (!viewingOwn) return;
+        e.preventDefault();
+        col.classList.add("drag-over");
+      });
+      col.addEventListener("dragleave", () => col.classList.remove("drag-over"));
+      col.addEventListener("drop", (e) => {
+        col.classList.remove("drag-over");
+        if (!viewingOwn) return;
+        const droppedTaskId = parseInt(e.dataTransfer.getData("text/tempo-task-id") || "0", 10);
+        if (droppedTaskId) {
+          e.preventDefault();
+          openTempoLogModal(iso, droppedTaskId);
+        }
+      });
+
+      gridEl.appendChild(col);
+    }
   } catch (err) {
-    chartsEl.innerHTML = `<div class="links-empty">Ошибка загрузки Tempo: ${escapeHtml(err.message)}</div>`;
+    gridEl.innerHTML = `<div class="links-empty" style="padding: 20px;">Ошибка загрузки Tempo: ${escapeHtml(err.message)}</div>`;
   }
 }
 
 function exportTempoCsv() {
   const data = state.lastTempoData;
   if (!data || !data.items) {
-    showToast("Сначала откройте вкладку Tempo для загрузки данных");
+    showToast("Нет данных для экспорта");
     return;
   }
   const esc = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
@@ -5477,7 +5561,7 @@ function exportTempoCsv() {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = `klukva_tempo_${data.date_from || "all"}_${data.date_to || "all"}.csv`;
+  a.download = `klukva_tempo_${data.date_from || "week"}_${data.date_to || "week"}.csv`;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
