@@ -2085,14 +2085,14 @@ class JSONDatabase:
     def create_backup(self, reason: str = "manual", keep: int = 10) -> Optional[Dict[str, Any]]:
         """Create a rotated backup copy of the JSON database."""
         with _lock:
-            if not os.path.exists(self.db_path):
+            if not os.path.exists(self.file_path):
                 return None
             os.makedirs(BACKUPS_DIR, exist_ok=True)
             safe_reason = re.sub(r"[^a-zA-Z0-9_-]", "", reason or "manual")[:24] or "manual"
             stamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S_%f")[:-3]
             fname = f"klukva_db_{stamp}_{safe_reason}.json"
             dst = os.path.join(BACKUPS_DIR, fname)
-            shutil.copy2(self.db_path, dst)
+            shutil.copy2(self.file_path, dst)
 
             # Rotate old backups, keeping newest `keep` files
             files = sorted(
