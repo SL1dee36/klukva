@@ -58,6 +58,10 @@ APP_VERSION = get_app_version()
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     db.ensure_system_admin()
+    try:
+        db.create_backup(reason="startup", keep=10)
+    except Exception:
+        pass
     yield
 
 

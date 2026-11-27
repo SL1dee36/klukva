@@ -1386,6 +1386,7 @@ UPDATE_TOKEN_FILE = ".klukva_update_token"
 PROTECTED_TOP_ENTRIES = {
     "klukva_db.json",
     "klukva_attachments",
+    "klukva_backups",
     ".git",
     ".venv",
     "venv",
@@ -1863,6 +1864,20 @@ def restart_server(current_user: Dict = Depends(require_role("admin"))):
     return {"ok": True, "restarting": True}
 
 
+@router.get("/system/backups")
+def list_system_backups(current_user: Dict = Depends(require_role("admin"))):
+    return db.list_backups()
+
+
+@router.post("/system/backups")
+def create_system_backup(current_user: Dict = Depends(require_role("admin"))):
+    b = db.create_backup(reason="manual", keep=10)
+    if not b:
+        raise HTTPException(status_code=500, detail="Не удалось создать резервную копию БД")
+    db.add_activity(current_user["username"], "system_backup", details=f"Создана резервная копия БД: {b['filename']}")
+    return b
+
+
 @router.post("/system/update")
 def trigger_update(
     req: Optional[SystemUpdateRequest] = None,
@@ -1874,7 +1889,15 @@ def trigger_update(
     if req and req.save_token and token:
         _save_github_token(repo_dir, token)
 
+    backup_info = None
+    try:
+        backup_info = db.create_backup(reason="pre_update", keep=10)
+    except Exception:
+        pass
+
     res = pull_repo_changes(repo_dir, token=token)
+    if backup_info:
+        res["backup_file"] = backup_info.get("filename")
     db.add_activity(
         current_user["username"],
         "system_update",

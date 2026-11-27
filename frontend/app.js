@@ -637,6 +637,37 @@ function renderUpdateVersionInfo(res) {
   }
 }
 
+async function loadSystemBackups() {
+  const listEl = document.getElementById("sysBackupsList");
+  if (!listEl) return;
+  try {
+    const items = await api("/api/system/backups");
+    if (!items || !items.length) {
+      listEl.innerHTML = '<span style="color: var(--text-dim); font-size: 11px;">Копий пока нет</span>';
+      return;
+    }
+    listEl.innerHTML = items.slice(0, 5).map(b => (
+      `<div class="sys-backup-item"><code>${escapeHtml(b.filename)}</code><span>${formatFileSize(b.size)} · ${formatDate(b.created_at)}</span></div>`
+    )).join("");
+  } catch (err) {
+    listEl.innerHTML = "";
+  }
+}
+
+async function handleCreateBackup() {
+  const btn = document.getElementById("btnCreateBackup");
+  if (btn) btn.disabled = true;
+  try {
+    const b = await api("/api/system/backups", { method: "POST" });
+    showToast(`Бэкап создан: ${b.filename}`);
+    await loadSystemBackups();
+  } catch (err) {
+    showToast(`Ошибка создания бэкапа: ${err.message}`);
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
 async function checkAppUpdate(silent = false) {
   const btnCheck = document.getElementById("btnCheckAppUpdate");
   const tokenInput = document.getElementById("inputUpdateGithubToken");
@@ -3403,6 +3434,10 @@ function setupEventListeners() {
   if (btnRestartServer) {
     btnRestartServer.addEventListener("click", handleRestartServer);
   }
+  const btnCreateBackup = document.getElementById("btnCreateBackup");
+  if (btnCreateBackup) {
+    btnCreateBackup.addEventListener("click", handleCreateBackup);
+  }
   const btnAppUpdate = document.getElementById("btnAppUpdate");
   if (btnAppUpdate) {
     btnAppUpdate.addEventListener("click", handleAppUpdate);
@@ -3725,6 +3760,7 @@ async function openProfileView(username = null) {
   const mustForce = isOwn && !!state.currentUser.must_change_credentials;
   if (isOwn && hasMinRole("admin") && !mustForce) {
     checkAppUpdate(true);
+    loadSystemBackups();
   }
 
   const fullpageEl = document.getElementById("fullpageProfile");

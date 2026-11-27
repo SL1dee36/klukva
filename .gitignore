@@ -12,5 +12,6 @@ deploy_to_server.py
 *.spec
 build/
 klukva_attachments/
+klukva_backups/
 .klukva_update_token
 .klukva_version.json

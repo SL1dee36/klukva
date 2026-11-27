@@ -6667,3 +6667,28 @@ body.board-drawer-resizing .fullpage-view.drawer-mode .drawer-resizer::after {
 .tasks-table tbody tr.row-selected {
   background-color: var(--accent-subtle);
 }
+
+/* ==========================================================================
+   SYSTEM BACKUPS LIST (v2.8.0)
+   ========================================================================== */
+.sys-backups-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.sys-backup-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 11px;
+  color: var(--text-muted);
+  flex-wrap: wrap;
+}
+
+.sys-backup-item code {
+  font-family: var(--font-mono);
+  color: var(--text-main);
+}

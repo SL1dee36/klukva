@@ -1253,6 +1253,14 @@
                 <span>Сохранить на сервере</span>
               </label>
             </div>
+            <div class="settings-row" style="margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border-subtle);">
+              <div class="settings-row-info">
+                <span class="settings-row-label">Резервные копии базы данных</span>
+                <span class="settings-row-desc">Автоматически создаются при запуске сервера и перед каждым обновлением (хранятся последние 10 копий)</span>
+                <div class="sys-backups-list" id="sysBackupsList"></div>
+              </div>
+              <button type="button" class="btn btn-secondary btn-sm" id="btnCreateBackup">Создать бэкап</button>
+            </div>
           </div>
         </div>
       </div>

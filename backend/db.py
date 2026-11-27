@@ -2082,7 +2082,61 @@ class JSONDatabase:
             }
 
 
+    def create_backup(self, reason: str = "manual", keep: int = 10) -> Optional[Dict[str, Any]]:
+        """Create a rotated backup copy of the JSON database."""
+        with _lock:
+            if not os.path.exists(self.db_path):
+                return None
+            os.makedirs(BACKUPS_DIR, exist_ok=True)
+            safe_reason = re.sub(r"[^a-zA-Z0-9_-]", "", reason or "manual")[:24] or "manual"
+            stamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S_%f")[:-3]
+            fname = f"klukva_db_{stamp}_{safe_reason}.json"
+            dst = os.path.join(BACKUPS_DIR, fname)
+            shutil.copy2(self.db_path, dst)
+
+            # Rotate old backups, keeping newest `keep` files
+            files = sorted(
+                [
+                    os.path.join(BACKUPS_DIR, f)
+                    for f in os.listdir(BACKUPS_DIR)
+                    if f.startswith("klukva_db_") and f.endswith(".json")
+                ],
+                key=lambda p: os.path.getmtime(p),
+                reverse=True,
+            )
+            for old_path in files[max(1, keep):]:
+                try:
+                    os.remove(old_path)
+                except Exception:
+                    pass
+
+            return {
+                "filename": fname,
+                "size": os.path.getsize(dst),
+                "reason": safe_reason,
+                "created_at": datetime.utcnow().isoformat() + "Z",
+            }
+
+    def list_backups(self) -> List[Dict[str, Any]]:
+        with _lock:
+            if not os.path.exists(BACKUPS_DIR):
+                return []
+            items = []
+            for f in os.listdir(BACKUPS_DIR):
+                if f.startswith("klukva_db_") and f.endswith(".json"):
+                    full = os.path.join(BACKUPS_DIR, f)
+                    st = os.stat(full)
+                    items.append({
+                        "filename": f,
+                        "size": st.st_size,
+                        "created_at": datetime.utcfromtimestamp(st.st_mtime).isoformat() + "Z",
+                    })
+            items.sort(key=lambda x: x["created_at"], reverse=True)
+            return items
+
+
 ATTACHMENTS_DIR = os.path.join(os.path.dirname(DB_FILE_PATH), "klukva_attachments")
 AVATARS_DIR = os.path.join(ATTACHMENTS_DIR, "avatars")
+BACKUPS_DIR = os.path.join(os.path.dirname(DB_FILE_PATH), "klukva_backups")
 
 db = JSONDatabase()
