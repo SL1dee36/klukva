@@ -3349,8 +3349,13 @@ function setupEventListeners() {
   // Диапазон дат на вкладке Аналитика
   document.querySelectorAll(".analytics-preset-btn").forEach(btn => {
     btn.addEventListener("click", () => {
-      const days = parseInt(btn.dataset.days, 10) || 14;
-      state.analyticsRange = { days, dateFrom: "", dateTo: "" };
+      const raw = btn.dataset.days;
+      if (raw === "all") {
+        state.analyticsRange = { days: null, dateFrom: "", dateTo: "", allTime: true };
+      } else {
+        const days = parseInt(raw, 10) || 14;
+        state.analyticsRange = { days, dateFrom: "", dateTo: "", allTime: false };
+      }
       document.querySelectorAll(".analytics-preset-btn").forEach(b => b.classList.toggle("active", b === btn));
       loadAnalytics();
     });
@@ -3362,7 +3367,7 @@ function setupEventListeners() {
       loadAnalytics();
       return;
     }
-    state.analyticsRange = { days: null, dateFrom: df, dateTo: dt };
+    state.analyticsRange = { days: null, dateFrom: df, dateTo: dt, allTime: false };
     document.querySelectorAll(".analytics-preset-btn").forEach(b => b.classList.remove("active"));
     loadAnalytics();
   });
@@ -4286,10 +4291,14 @@ async function loadAnalytics() {
   if (!kpiGrid || !chartsGrid) return;
   try {
     const params = new URLSearchParams();
-    if (state.analyticsRange.dateFrom) params.set("date_from", state.analyticsRange.dateFrom);
-    if (state.analyticsRange.dateTo) params.set("date_to", state.analyticsRange.dateTo);
-    if (!state.analyticsRange.dateFrom && !state.analyticsRange.dateTo && state.analyticsRange.days) {
-      params.set("days", String(state.analyticsRange.days));
+    if (state.analyticsRange.allTime) {
+      params.set("all_time", "true");
+    } else {
+      if (state.analyticsRange.dateFrom) params.set("date_from", state.analyticsRange.dateFrom);
+      if (state.analyticsRange.dateTo) params.set("date_to", state.analyticsRange.dateTo);
+      if (!state.analyticsRange.dateFrom && !state.analyticsRange.dateTo && state.analyticsRange.days) {
+        params.set("days", String(state.analyticsRange.days));
+      }
     }
     const qs = params.toString();
     const data = await api(`/api/analytics${qs ? `?${qs}` : ""}`);

@@ -1762,13 +1762,66 @@ class JSONDatabase:
         days: Optional[int] = None,
         date_from: Optional[str] = None,
         date_to: Optional[str] = None,
+        all_time: bool = False,
     ) -> Dict[str, Any]:
         with _lock:
             data = self._read_data()
-            tasks = data.get("tasks", [])
+            all_tasks = data.get("tasks", [])
             sprints = data.get("sprints", [])
             users = data.get("users", [])
             activities = data.get("activity", [])
+
+            # Resolve selected date range first so ALL analytics metrics reflect it
+            today = datetime.utcnow().date()
+            start_d = None
+            end_d = today
+            if date_to:
+                try:
+                    end_d = datetime.strptime(date_to[:10], "%Y-%m-%d").date()
+                except ValueError:
+                    end_d = today
+            if date_from:
+                try:
+                    start_d = datetime.strptime(date_from[:10], "%Y-%m-%d").date()
+                except ValueError:
+                    start_d = None
+
+            if all_time and not date_from and not date_to:
+                dates_pool = [
+                    (t.get("created_at") or "")[:10]
+                    for t in all_tasks
+                    if (t.get("created_at") or "")[:10]
+                ]
+                if dates_pool:
+                    try:
+                        min_d = datetime.strptime(min(dates_pool), "%Y-%m-%d").date()
+                        start_d = max(min_d, end_d - timedelta(days=365))
+                    except ValueError:
+                        start_d = end_d - timedelta(days=29)
+                else:
+                    start_d = end_d - timedelta(days=29)
+            elif start_d is None:
+                eff_days = max(1, min(365, int(days or 14)))
+                start_d = end_d - timedelta(days=eff_days - 1)
+
+            if start_d > end_d:
+                start_d, end_d = end_d, start_d
+            if (end_d - start_d).days > 365:
+                start_d = end_d - timedelta(days=365)
+
+            start_str = start_d.isoformat()
+            end_str = end_d.isoformat()
+
+            def _in_range(t: Dict[str, Any]) -> bool:
+                if all_time and not date_from and not date_to:
+                    return True
+                for k in ("created_at", "started_at", "completed_at", "updated_at"):
+                    ds = (t.get(k) or "")[:10]
+                    if ds and start_str <= ds <= end_str:
+                        return True
+                return False
+
+            tasks = [t for t in all_tasks if _in_range(t)]
 
             by_status = {s: 0 for s in VALID_STATUSES}
             by_status_sp = {s: 0.0 for s in VALID_STATUSES}
@@ -1873,30 +1926,7 @@ class JSONDatabase:
                     "closed_at": s.get("closed_at"),
                 })
 
-            # Dynamic activity date range
-            today = datetime.utcnow().date()
-            start_d = None
-            end_d = today
-            if date_to:
-                try:
-                    end_d = datetime.strptime(date_to[:10], "%Y-%m-%d").date()
-                except ValueError:
-                    end_d = today
-            if date_from:
-                try:
-                    start_d = datetime.strptime(date_from[:10], "%Y-%m-%d").date()
-                except ValueError:
-                    start_d = None
-
-            if start_d is None:
-                eff_days = max(1, min(365, int(days or 14)))
-                start_d = end_d - timedelta(days=eff_days - 1)
-
-            if start_d > end_d:
-                start_d, end_d = end_d, start_d
-            if (end_d - start_d).days > 365:
-                start_d = end_d - timedelta(days=365)
-
+            # Dynamic activity date range (uses start_d..end_d resolved above)
             num_days = (end_d - start_d).days + 1
             day_list = [(start_d + timedelta(days=i)).isoformat() for i in range(num_days)]
             created_day = {d: 0 for d in day_list}

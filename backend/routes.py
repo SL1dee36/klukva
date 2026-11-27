@@ -703,9 +703,10 @@ def get_analytics(
     days: Optional[int] = Query(None, ge=1, le=365),
     date_from: Optional[str] = Query(None),
     date_to: Optional[str] = Query(None),
+    all_time: bool = Query(False),
     current_user: Dict = Depends(get_current_user),
 ):
-    return db.get_analytics(days=days, date_from=date_from, date_to=date_to)
+    return db.get_analytics(days=days, date_from=date_from, date_to=date_to, all_time=all_time)
 
 
 # ============================================================================
