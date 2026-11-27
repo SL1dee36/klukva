@@ -86,6 +86,7 @@ const state = {
   currentTab: initialTab, // 'backlog' | 'sprints' | 'board' | 'analytics'
   boardFilterOnlyMy: false,
   boardHideEmptyLanes: localStorage.getItem("klukva_board_hide_empty") === "1",
+  selectedBacklogIds: new Set(),
   currentTaskDetail: null,
   taskDrawerMode: false,
   pendingTotpChallenge: null,
@@ -1013,7 +1014,8 @@ function populateAssigneeSelects() {
     document.getElementById("createAssignee"),
     document.getElementById("detailAssignee"),
     document.getElementById("splitAssignee"),
-    document.getElementById("filterAssignee")
+    document.getElementById("filterAssignee"),
+    document.getElementById("bulkAssigneeSelect")
   ];
 
   selects.forEach(select => {
@@ -1180,10 +1182,33 @@ function renderPureBacklog() {
   });
 
   let totalSp = 0;
+  const visibleIds = new Set(backlogTasks.map(t => t.id));
+  state.selectedBacklogIds.forEach(id => {
+    if (!visibleIds.has(id)) state.selectedBacklogIds.delete(id);
+  });
+
   backlogTasks.forEach(t => {
     if (t.story_points) totalSp += Number(t.story_points);
 
     const tr = document.createElement("tr");
+    if (state.selectedBacklogIds.has(t.id)) tr.classList.add("row-selected");
+
+    // Чекбокс
+    const tdCheck = document.createElement("td");
+    tdCheck.style.textAlign = "center";
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.className = "backlog-row-cb";
+    cb.checked = state.selectedBacklogIds.has(t.id);
+    cb.addEventListener("click", (e) => e.stopPropagation());
+    cb.addEventListener("change", () => {
+      if (cb.checked) state.selectedBacklogIds.add(t.id);
+      else state.selectedBacklogIds.delete(t.id);
+      tr.classList.toggle("row-selected", cb.checked);
+      updateBacklogBulkBar(backlogTasks.length);
+    });
+    tdCheck.appendChild(cb);
+    tr.appendChild(tdCheck);
 
     // Ключ
     const tdKey = document.createElement("td");
@@ -1283,6 +1308,61 @@ function renderPureBacklog() {
   }
 
   restoreScrollPositions();
+  updateBacklogBulkBar(backlogTasks.length);
+}
+
+function updateBacklogBulkBar(totalVisible = 0) {
+  const bar = document.getElementById("backlogBulkBar");
+  const countEl = document.getElementById("backlogBulkCount");
+  const selectAll = document.getElementById("backlogSelectAll");
+  const n = state.selectedBacklogIds.size;
+  if (bar) bar.style.display = n > 0 ? "flex" : "none";
+  if (countEl) countEl.textContent = `Выбрано: ${n}`;
+  if (selectAll) {
+    selectAll.checked = totalVisible > 0 && n === totalVisible;
+    selectAll.indeterminate = n > 0 && n < totalVisible;
+  }
+}
+
+async function applyBulkBacklogAction(mode, value = null) {
+  const ids = Array.from(state.selectedBacklogIds);
+  if (!ids.length) return;
+  try {
+    if (mode === "to-sprint") {
+      if (!state.activeSprint) {
+        showToast("Сначала создайте активный спринт на вкладке «Спринты»");
+        return;
+      }
+      await Promise.all(ids.map(id => api(`/api/tasks/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ in_sprint: true })
+      })));
+      showToast(`В активный спринт добавлено задач: ${ids.length}`);
+    } else if (mode === "to-next-sprint") {
+      for (const id of ids) {
+        await api(`/api/tasks/${id}/next-sprint`, { method: "POST" });
+      }
+      await loadActiveSprint();
+      showToast(`В следующий спринт добавлено задач: ${ids.length}`);
+    } else if (mode === "status" && value) {
+      await Promise.all(ids.map(id => api(`/api/tasks/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ status: value })
+      })));
+      showToast(`Статус «${value}» установлен для ${ids.length} задач`);
+    } else if (mode === "assignee") {
+      const assignee = value === "__unassign__" ? null : value;
+      await Promise.all(ids.map(id => api(`/api/tasks/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ assignee })
+      })));
+      showToast(`Исполнитель обновлён для ${ids.length} задач`);
+    }
+    state.selectedBacklogIds.clear();
+    await loadTasks();
+  } catch (err) {
+    showToast(`Ошибка массовой операции: ${err.message}`);
+  }
 }
 
 // ============================================================================
@@ -1348,6 +1428,61 @@ function renderSprintsView() {
 
   renderPastSprintsHistory();
   restoreScrollPositions();
+  updateBacklogBulkBar(backlogTasks.length);
+}
+
+function updateBacklogBulkBar(totalVisible = 0) {
+  const bar = document.getElementById("backlogBulkBar");
+  const countEl = document.getElementById("backlogBulkCount");
+  const selectAll = document.getElementById("backlogSelectAll");
+  const n = state.selectedBacklogIds.size;
+  if (bar) bar.style.display = n > 0 ? "flex" : "none";
+  if (countEl) countEl.textContent = `Выбрано: ${n}`;
+  if (selectAll) {
+    selectAll.checked = totalVisible > 0 && n === totalVisible;
+    selectAll.indeterminate = n > 0 && n < totalVisible;
+  }
+}
+
+async function applyBulkBacklogAction(mode, value = null) {
+  const ids = Array.from(state.selectedBacklogIds);
+  if (!ids.length) return;
+  try {
+    if (mode === "to-sprint") {
+      if (!state.activeSprint) {
+        showToast("Сначала создайте активный спринт на вкладке «Спринты»");
+        return;
+      }
+      await Promise.all(ids.map(id => api(`/api/tasks/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ in_sprint: true })
+      })));
+      showToast(`В активный спринт добавлено задач: ${ids.length}`);
+    } else if (mode === "to-next-sprint") {
+      for (const id of ids) {
+        await api(`/api/tasks/${id}/next-sprint`, { method: "POST" });
+      }
+      await loadActiveSprint();
+      showToast(`В следующий спринт добавлено задач: ${ids.length}`);
+    } else if (mode === "status" && value) {
+      await Promise.all(ids.map(id => api(`/api/tasks/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ status: value })
+      })));
+      showToast(`Статус «${value}» установлен для ${ids.length} задач`);
+    } else if (mode === "assignee") {
+      const assignee = value === "__unassign__" ? null : value;
+      await Promise.all(ids.map(id => api(`/api/tasks/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ assignee })
+      })));
+      showToast(`Исполнитель обновлён для ${ids.length} задач`);
+    }
+    state.selectedBacklogIds.clear();
+    await loadTasks();
+  } catch (err) {
+    showToast(`Ошибка массовой операции: ${err.message}`);
+  }
 }
 
 function createDraggableTaskRow(task, zone) {
@@ -1803,6 +1938,61 @@ function renderScrumBoard() {
   }
 
   restoreScrollPositions();
+  updateBacklogBulkBar(backlogTasks.length);
+}
+
+function updateBacklogBulkBar(totalVisible = 0) {
+  const bar = document.getElementById("backlogBulkBar");
+  const countEl = document.getElementById("backlogBulkCount");
+  const selectAll = document.getElementById("backlogSelectAll");
+  const n = state.selectedBacklogIds.size;
+  if (bar) bar.style.display = n > 0 ? "flex" : "none";
+  if (countEl) countEl.textContent = `Выбрано: ${n}`;
+  if (selectAll) {
+    selectAll.checked = totalVisible > 0 && n === totalVisible;
+    selectAll.indeterminate = n > 0 && n < totalVisible;
+  }
+}
+
+async function applyBulkBacklogAction(mode, value = null) {
+  const ids = Array.from(state.selectedBacklogIds);
+  if (!ids.length) return;
+  try {
+    if (mode === "to-sprint") {
+      if (!state.activeSprint) {
+        showToast("Сначала создайте активный спринт на вкладке «Спринты»");
+        return;
+      }
+      await Promise.all(ids.map(id => api(`/api/tasks/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ in_sprint: true })
+      })));
+      showToast(`В активный спринт добавлено задач: ${ids.length}`);
+    } else if (mode === "to-next-sprint") {
+      for (const id of ids) {
+        await api(`/api/tasks/${id}/next-sprint`, { method: "POST" });
+      }
+      await loadActiveSprint();
+      showToast(`В следующий спринт добавлено задач: ${ids.length}`);
+    } else if (mode === "status" && value) {
+      await Promise.all(ids.map(id => api(`/api/tasks/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ status: value })
+      })));
+      showToast(`Статус «${value}» установлен для ${ids.length} задач`);
+    } else if (mode === "assignee") {
+      const assignee = value === "__unassign__" ? null : value;
+      await Promise.all(ids.map(id => api(`/api/tasks/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ assignee })
+      })));
+      showToast(`Исполнитель обновлён для ${ids.length} задач`);
+    }
+    state.selectedBacklogIds.clear();
+    await loadTasks();
+  } catch (err) {
+    showToast(`Ошибка массовой операции: ${err.message}`);
+  }
 }
 
 function renderSwimlane(parent, title, username, tasks, columns) {
@@ -3162,6 +3352,46 @@ function setupEventListeners() {
     document.getElementById("filterSearch").value = "";
     try { sessionStorage.removeItem("klukva_filters"); } catch (e) { }
     loadTasks();
+  });
+
+  // Массовые действия в бэклоге
+  document.getElementById("backlogSelectAll")?.addEventListener("change", (e) => {
+    const checked = e.target.checked;
+    const rows = document.querySelectorAll("#pureBacklogTableBody tr");
+    rows.forEach(r => {
+      const cb = r.querySelector(".backlog-row-cb");
+      if (!cb) return;
+      cb.checked = checked;
+      r.classList.toggle("row-selected", checked);
+    });
+    state.selectedBacklogIds.clear();
+    if (checked) {
+      const statusFilter = document.getElementById("filterStatus")?.value;
+      state.tasks.filter(t => {
+        if (t.in_sprint) return false;
+        if (state.plannedSprint && t.sprint_id === state.plannedSprint.id) return false;
+        if (t.sprint_id && t.status === "Завершено") return false;
+        if (!statusFilter && t.status === "Завершено") return false;
+        return true;
+      }).forEach(t => state.selectedBacklogIds.add(t.id));
+    }
+    updateBacklogBulkBar(rows.length);
+  });
+  document.getElementById("btnBulkToSprint")?.addEventListener("click", () => applyBulkBacklogAction("to-sprint"));
+  document.getElementById("btnBulkToNextSprint")?.addEventListener("click", () => applyBulkBacklogAction("to-next-sprint"));
+  document.getElementById("bulkStatusSelect")?.addEventListener("change", (e) => {
+    const val = e.target.value;
+    e.target.value = "";
+    if (val) applyBulkBacklogAction("status", val);
+  });
+  document.getElementById("bulkAssigneeSelect")?.addEventListener("change", (e) => {
+    const val = e.target.value;
+    e.target.value = "";
+    if (val) applyBulkBacklogAction("assignee", val);
+  });
+  document.getElementById("btnBulkClear")?.addEventListener("click", () => {
+    state.selectedBacklogIds.clear();
+    renderPureBacklog();
   });
 
   // Кнопка обновления с GitHub и проверки версии

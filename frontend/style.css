@@ -6642,3 +6642,28 @@ body.board-drawer-resizing .fullpage-view.drawer-mode .drawer-resizer::after {
   color: var(--text-muted);
   margin-left: 4px;
 }
+
+/* ==========================================================================
+   BACKLOG BULK ACTIONS BAR (v2.7.2)
+   ========================================================================== */
+.backlog-bulk-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 8px 16px;
+  background-color: var(--accent-subtle);
+  border-bottom: 1px solid var(--border-default);
+  flex-shrink: 0;
+}
+
+.bulk-count {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-main);
+  margin-right: 4px;
+}
+
+.tasks-table tbody tr.row-selected {
+  background-color: var(--accent-subtle);
+}

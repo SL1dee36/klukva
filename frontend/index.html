@@ -184,10 +184,30 @@
               </div>
             </div>
 
+            <div class="backlog-bulk-bar" id="backlogBulkBar" style="display: none;">
+              <span class="bulk-count" id="backlogBulkCount">Выбрано: 0</span>
+              <button type="button" class="btn btn-primary btn-sm" id="btnBulkToSprint">+ В спринт</button>
+              <button type="button" class="btn btn-secondary btn-sm" id="btnBulkToNextSprint">+ След. спринт</button>
+              <select id="bulkStatusSelect" class="form-control select-sm" style="width: auto;">
+                <option value="">Сменить статус...</option>
+                <option value="Бэклог">Бэклог</option>
+                <option value="В работе">В работе</option>
+                <option value="Завершено">Завершено</option>
+                <option value="Не реализовано">Не реализовано</option>
+                <option value="Реализовано частично">Реализовано частично</option>
+              </select>
+              <select id="bulkAssigneeSelect" class="form-control select-sm" style="width: auto;">
+                <option value="">Назначить исполнителя...</option>
+                <option value="__unassign__">Снять исполнителя</option>
+              </select>
+              <button type="button" class="btn btn-ghost btn-sm" id="btnBulkClear">Снять выделение</button>
+            </div>
+
             <div class="table-scroll-wrapper">
               <table class="tasks-table">
                 <thead>
                   <tr>
+                    <th style="width: 34px; text-align: center;"><input type="checkbox" id="backlogSelectAll" title="Выбрать все задачи"></th>
                     <th style="width: 100px;">Ключ</th>
                     <th>Название задачи</th>
                     <th style="width: 80px; text-align: center;">SP</th>
