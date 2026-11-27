@@ -1886,8 +1886,13 @@ function renderScrumBoard() {
   const bType = document.getElementById("boardFilterType")?.value || "";
   const bCluster = document.getElementById("boardFilterCluster")?.value || "";
   const resetBtn = document.getElementById("boardResetFilters");
+  const boardFilterDot = document.getElementById("boardFilterActiveDot");
+  const hasBoardFilters = Boolean(bSearch || bType || bCluster);
   if (resetBtn) {
-    resetBtn.style.display = (bSearch || bType || bCluster) ? "inline-flex" : "none";
+    resetBtn.style.display = hasBoardFilters ? "inline-flex" : "none";
+  }
+  if (boardFilterDot) {
+    boardFilterDot.style.display = hasBoardFilters ? "inline" : "none";
   }
 
   if (bSearch) {
@@ -3292,6 +3297,18 @@ function setupEventListeners() {
       try { localStorage.setItem("klukva_board_hide_empty", state.boardHideEmptyLanes ? "1" : "0"); } catch (e) { }
       syncEmptyBtn();
       renderScrumBoard();
+    });
+  }
+
+  const btnToggleBoardFilters = document.getElementById("btnToggleBoardFilters");
+  const boardFiltersBar = document.getElementById("boardFiltersBar");
+  if (btnToggleBoardFilters && boardFiltersBar) {
+    btnToggleBoardFilters.addEventListener("click", () => {
+      const isOpen = boardFiltersBar.classList.toggle("open");
+      btnToggleBoardFilters.classList.toggle("active", isOpen);
+      if (isOpen) {
+        document.getElementById("boardSearchInput")?.focus();
+      }
     });
   }
 

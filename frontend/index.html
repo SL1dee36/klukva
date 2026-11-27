@@ -370,8 +370,26 @@
             <span class="board-sprint-name" id="boardSprintNameDisplay">V-Спринт (Активный)</span>
           </div>
           <div class="board-quick-actions">
-            <input type="text" id="boardSearchInput" class="form-control input-sm board-filter-input" placeholder="Поиск по ключу, названию...">
-            <select id="boardFilterType" class="form-control select-sm board-filter-select" aria-label="Тип задачи на доске">
+            <button type="button" class="btn btn-secondary btn-sm btn-filter-toggle" id="btnToggleBoardFilters">
+              <span class="filter-toggle-icon">&#9776;</span>
+              <span>Фильтры и поиск</span>
+              <span class="filter-active-dot" id="boardFilterActiveDot" style="display: none;">●</span>
+            </button>
+            <button class="board-quick-link" id="boardFilterOnlyMy">Только мои задачи</button>
+            <button class="board-quick-link" id="boardFilterAll">Все задачи</button>
+            <button type="button" class="board-quick-link" id="boardToggleEmptyLanes">Скрыть пустые</button>
+            <span class="board-counter" id="boardTaskCount">0 задач</span>
+          </div>
+        </div>
+
+        <div class="board-filters-bar" id="boardFiltersBar">
+          <div class="filter-item flex-grow">
+            <label for="boardSearchInput">Поиск</label>
+            <input type="text" id="boardSearchInput" class="form-control input-sm" placeholder="Поиск по ключу, названию...">
+          </div>
+          <div class="filter-item">
+            <label for="boardFilterType">Тип</label>
+            <select id="boardFilterType" class="form-control select-sm" aria-label="Тип задачи на доске">
               <option value="">Все типы</option>
               <option value="Задача">Задача</option>
               <option value="Нововведение">Нововведение</option>
@@ -382,14 +400,15 @@
               <option value="Эпик">Эпик</option>
               <option value="Сириус">Сириус</option>
             </select>
-            <select id="boardFilterCluster" class="form-control select-sm board-filter-select" aria-label="Эпик или Сириус на доске">
+          </div>
+          <div class="filter-item">
+            <label for="boardFilterCluster">Эпик / Сириус</label>
+            <select id="boardFilterCluster" class="form-control select-sm" aria-label="Эпик или Сириус на доске">
               <option value="">Все эпики/сириусы</option>
             </select>
-            <button type="button" class="btn btn-secondary btn-sm" id="boardResetFilters" style="display: none;">Сброс</button>
-            <button class="board-quick-link" id="boardFilterOnlyMy">Только мои задачи</button>
-            <button class="board-quick-link" id="boardFilterAll">Все задачи</button>
-            <button type="button" class="board-quick-link" id="boardToggleEmptyLanes">Скрыть пустые</button>
-            <span class="board-counter" id="boardTaskCount">0 задач</span>
+          </div>
+          <div class="filter-item filter-actions">
+            <button type="button" class="btn btn-secondary btn-sm" id="boardResetFilters" style="display: none;">Сбросить</button>
           </div>
         </div>
 
