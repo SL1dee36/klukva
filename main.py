@@ -39,6 +39,22 @@ def get_frontend_dir() -> str:
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 FRONTEND_DIR = get_frontend_dir()
 
+
+def get_app_version() -> str:
+    ver_file = os.path.join(BASE_DIR, "VERSION")
+    if os.path.exists(ver_file):
+        try:
+            with open(ver_file, "r", encoding="utf-8") as f:
+                v = f.read().strip()
+                if v:
+                    return v
+        except Exception:
+            pass
+    return "2.4.1"
+
+
+APP_VERSION = get_app_version()
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     db.ensure_system_admin()
@@ -48,7 +64,7 @@ async def lifespan(_app: FastAPI):
 app = FastAPI(
     title="Klukva",
     description="Ultra-lightweight utilitarian task tracker",
-    version="1.0.0",
+    version=APP_VERSION,
     docs_url="/api/docs",
     redoc_url=None,
     lifespan=lifespan,

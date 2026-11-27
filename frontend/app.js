@@ -599,10 +599,13 @@ function renderUpdateVersionInfo(res) {
   const tokenRow = document.getElementById("sysUpdateTokenRow");
 
   const fmtVer = (v) => {
-    if (!v || !v.short_sha) return "неизвестна";
+    if (!v) return "неизвестна";
+    const appVer = v.app_version ? `v${v.app_version}` : "";
+    const shaPart = v.short_sha || "";
+    const head = [appVer, shaPart].filter(Boolean).join(" · ") || "неизвестна";
     const datePart = v.date ? ` (${formatDate(v.date)})` : "";
     const msgPart = v.message ? ` — ${v.message.slice(0, 48)}` : "";
-    return `${v.short_sha}${datePart}${msgPart}`;
+    return `${head}${datePart}${msgPart}`;
   };
 
   if (curEl) curEl.textContent = fmtVer(res.current);

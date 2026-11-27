@@ -1501,7 +1501,21 @@ def _write_version_meta(repo_dir: str, info: Dict[str, Any]) -> None:
         pass
 
 
+def _get_app_version(repo_dir: str) -> str:
+    ver_file = os.path.join(repo_dir, "VERSION")
+    if os.path.exists(ver_file):
+        try:
+            with open(ver_file, "r", encoding="utf-8") as f:
+                v = f.read().strip()
+                if v:
+                    return v
+        except Exception:
+            pass
+    return "2.4.1"
+
+
 def _get_local_version_info(repo_dir: str) -> Dict[str, Any]:
+    app_ver = _get_app_version(repo_dir)
     git_dir = os.path.join(repo_dir, ".git")
     if os.path.exists(git_dir):
         try:
@@ -1518,6 +1532,7 @@ def _get_local_version_info(repo_dir: str) -> Dict[str, Any]:
                 lines = (res.stdout or "").splitlines()
                 if len(lines) >= 2:
                     return {
+                        "app_version": app_ver,
                         "sha": lines[0].strip(),
                         "short_sha": lines[1].strip(),
                         "date": lines[2].strip() if len(lines) > 2 else None,
@@ -1530,6 +1545,7 @@ def _get_local_version_info(repo_dir: str) -> Dict[str, Any]:
     meta = _read_version_meta(repo_dir)
     if meta:
         return {
+            "app_version": meta.get("app_version") or app_ver,
             "sha": meta.get("sha"),
             "short_sha": meta.get("short_sha") or (meta.get("sha") or "")[:7],
             "date": meta.get("date"),
@@ -1539,11 +1555,12 @@ def _get_local_version_info(repo_dir: str) -> Dict[str, Any]:
         }
 
     return {
+        "app_version": app_ver,
         "sha": None,
         "short_sha": None,
         "date": None,
         "message": "",
-        "source": "unknown",
+        "source": "version_file",
     }
 
 
