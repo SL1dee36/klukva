@@ -768,6 +768,7 @@ class JSONDatabase:
         created_by: str = "",
         parent_task_id: Optional[int] = None,
         in_sprint: bool = False,
+        sprint_id: Optional[int] = None,
         order: Optional[float] = None,
         task_type: str = "Задача",
         cluster: str = "",
@@ -791,6 +792,12 @@ class JSONDatabase:
             completed_at = now if eff_status == "Завершено" else None
             eff_cluster = cluster if cluster in VALID_CLUSTERS else ""
             task_order = float(order) if order is not None else float(task_id)
+            eff_sprint_id = sprint_id
+            if bool(in_sprint) and eff_sprint_id is None:
+                for s in data.get("sprints", []):
+                    if s.get("status") == "active":
+                        eff_sprint_id = s["id"]
+                        break
             new_task = {
                 "id": task_id,
                 "key": task_key,
@@ -804,6 +811,7 @@ class JSONDatabase:
                 "sirius_id": clean_sirius,
                 "assignee": assignee.strip() if assignee else None,
                 "in_sprint": bool(in_sprint),
+                "sprint_id": eff_sprint_id,
                 "order": task_order,
                 "created_by": created_by,
                 "created_at": now,
@@ -852,7 +860,7 @@ class JSONDatabase:
             now = datetime.utcnow().isoformat() + "Z"
             allowed_fields = [
                 "title", "description", "story_points", "status",
-                "assignee", "started_at", "in_sprint", "order",
+                "assignee", "started_at", "in_sprint", "sprint_id", "order",
                 "task_type", "cluster"
             ]
             for field in allowed_fields:
@@ -881,6 +889,8 @@ class JSONDatabase:
                         val = None
                     if field == "in_sprint":
                         val = bool(val)
+                    if field == "sprint_id":
+                        val = int(val) if val is not None else None
                     if field == "order" and val is not None:
                         val = float(val)
                     task[field] = val
@@ -969,6 +979,14 @@ class JSONDatabase:
             data = self._read_data()
             return data.get("sprints", [])
 
+    def get_sprint_by_id(self, sprint_id: int) -> Optional[Dict[str, Any]]:
+        with _lock:
+            data = self._read_data()
+            for s in data.get("sprints", []):
+                if s["id"] == sprint_id:
+                    return s
+            return None
+
     def get_active_sprint(self) -> Optional[Dict[str, Any]]:
         with _lock:
             data = self._read_data()
@@ -977,7 +995,90 @@ class JSONDatabase:
                     return s
             return None
 
-    def create_sprint(self, name: str, goal: str = "", created_by: str = "") -> Dict[str, Any]:
+    def get_planned_sprint(self) -> Optional[Dict[str, Any]]:
+        with _lock:
+            data = self._read_data()
+            for s in data.get("sprints", []):
+                if s.get("status") == "planned":
+                    return s
+            return None
+
+    def _next_sprint_default_name(self, data: Dict[str, Any], next_id: int) -> str:
+        active = None
+        for s in data.get("sprints", []):
+            if s.get("status") == "active":
+                active = s
+                break
+        if active:
+            curr_name = active.get("name", "")
+            match = re.search(r'(\d+)\s*$', curr_name.strip())
+            if match:
+                prefix = curr_name[:match.start(1)]
+                num = int(match.group(1)) + 1
+                return f"{prefix}{num}"
+        return f"Спринт {next_id}"
+
+    def get_or_create_planned_sprint(self, created_by: str = "") -> Dict[str, Any]:
+        with _lock:
+            data = self._read_data()
+            if "sprints" not in data:
+                data["sprints"] = []
+            for s in data["sprints"]:
+                if s.get("status") == "planned":
+                    return s
+
+            if "counters" not in data:
+                data["counters"] = {}
+            if "sprint_id" not in data["counters"]:
+                data["counters"]["sprint_id"] = len(data["sprints"])
+
+            data["counters"]["sprint_id"] += 1
+            sprint_id = data["counters"]["sprint_id"]
+            now = datetime.utcnow().isoformat() + "Z"
+            name = self._next_sprint_default_name(data, sprint_id)
+            planned = {
+                "id": sprint_id,
+                "name": name,
+                "goal": "",
+                "status": "planned",
+                "created_at": now,
+                "closed_at": None,
+                "created_by": created_by,
+            }
+            data["sprints"].append(planned)
+            self._atomic_write(data)
+            return planned
+
+    def update_sprint(
+        self,
+        sprint_id: int,
+        name: Optional[str] = None,
+        goal: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        with _lock:
+            data = self._read_data()
+            target = None
+            for s in data.get("sprints", []):
+                if s["id"] == sprint_id:
+                    target = s
+                    break
+            if not target:
+                return None
+            if name is not None and name.strip():
+                target["name"] = name.strip()
+            if goal is not None:
+                target["goal"] = goal.strip()
+            target["updated_at"] = datetime.utcnow().isoformat() + "Z"
+            self._atomic_write(data)
+            return target
+
+    def create_sprint(
+        self,
+        name: str,
+        goal: str = "",
+        created_by: str = "",
+        status: str = "active",
+    ) -> Dict[str, Any]:
         with _lock:
             data = self._read_data()
             if "sprints" not in data:
@@ -987,7 +1088,36 @@ class JSONDatabase:
             if "sprint_id" not in data["counters"]:
                 data["counters"]["sprint_id"] = len(data["sprints"])
 
+            eff_status = "planned" if status == "planned" else "active"
             now = datetime.utcnow().isoformat() + "Z"
+
+            if eff_status == "planned":
+                # Reuse existing planned sprint if one already exists
+                for s in data["sprints"]:
+                    if s.get("status") == "planned":
+                        if name and name.strip():
+                            s["name"] = name.strip()
+                        if goal is not None:
+                            s["goal"] = goal.strip()
+                        s["updated_at"] = now
+                        self._atomic_write(data)
+                        return s
+
+                data["counters"]["sprint_id"] += 1
+                sprint_id = data["counters"]["sprint_id"]
+                new_sprint = {
+                    "id": sprint_id,
+                    "name": name.strip() if name else self._next_sprint_default_name(data, sprint_id),
+                    "goal": goal.strip() if goal else "",
+                    "status": "planned",
+                    "created_at": now,
+                    "closed_at": None,
+                    "created_by": created_by,
+                }
+                data["sprints"].append(new_sprint)
+                self._atomic_write(data)
+                return new_sprint
+
             # Close any currently active sprint before starting a new one
             for s in data["sprints"]:
                 if s.get("status") == "active":
@@ -1048,41 +1178,64 @@ class JSONDatabase:
                 data["counters"]["sprint_id"] = len(data.get("sprints", []))
 
             new_sprint = None
+            promoted_planned_id = None
             if create_next_sprint:
-                data["counters"]["sprint_id"] += 1
-                new_sprint_id = data["counters"]["sprint_id"]
+                # If a planned sprint already exists, promote it to active!
+                planned = None
+                for s in data.get("sprints", []):
+                    if s.get("status") == "planned":
+                        planned = s
+                        break
 
-                if next_sprint_name and next_sprint_name.strip():
-                    name = next_sprint_name.strip()
+                if planned:
+                    planned["status"] = "active"
+                    planned["closed_at"] = None
+                    if next_sprint_name and next_sprint_name.strip():
+                        planned["name"] = next_sprint_name.strip()
+                    planned["started_at"] = now
+                    new_sprint = planned
+                    promoted_planned_id = planned["id"]
                 else:
-                    curr_name = target_sprint.get("name", "")
-                    match = re.search(r'(\d+)\s*$', curr_name.strip())
-                    if match:
-                        prefix = curr_name[:match.start(1)]
-                        num = int(match.group(1)) + 1
-                        name = f"{prefix}{num}"
-                    else:
-                        name = f"Спринт {new_sprint_id}"
+                    data["counters"]["sprint_id"] += 1
+                    new_sprint_id = data["counters"]["sprint_id"]
 
-                new_sprint = {
-                    "id": new_sprint_id,
-                    "name": name,
-                    "goal": "",
-                    "status": "active",
-                    "created_at": now,
-                    "closed_at": None,
-                    "created_by": target_sprint.get("created_by", "")
-                }
-                data["sprints"].append(new_sprint)
+                    if next_sprint_name and next_sprint_name.strip():
+                        name = next_sprint_name.strip()
+                    else:
+                        curr_name = target_sprint.get("name", "")
+                        match = re.search(r'(\d+)\s*$', curr_name.strip())
+                        if match:
+                            prefix = curr_name[:match.start(1)]
+                            num = int(match.group(1)) + 1
+                            name = f"{prefix}{num}"
+                        else:
+                            name = f"Спринт {new_sprint_id}"
+
+                    new_sprint = {
+                        "id": new_sprint_id,
+                        "name": name,
+                        "goal": "",
+                        "status": "active",
+                        "created_at": now,
+                        "closed_at": None,
+                        "created_by": target_sprint.get("created_by", "")
+                    }
+                    data["sprints"].append(new_sprint)
 
             # Process sprint tasks:
             # 1. Completed tasks stay associated with the closed sprint and NEVER return to backlog.
             # 2. Uncompleted tasks placed in sprint move to the new sprint, NEVER return to backlog.
+            # 3. Tasks already scheduled in the promoted planned sprint become in_sprint=True.
             completed_count = 0
             moved_count = 0
+            planned_activated_count = 0
 
             for t in data.get("tasks", []):
-                if bool(t.get("in_sprint", False)) or t.get("sprint_id") == sprint_id:
+                if promoted_planned_id is not None and t.get("sprint_id") == promoted_planned_id and not bool(t.get("in_sprint", False)):
+                    t["in_sprint"] = True
+                    t["updated_at"] = now
+                    planned_activated_count += 1
+                elif bool(t.get("in_sprint", False)) or t.get("sprint_id") == sprint_id:
                     if t.get("status") == "Завершено":
                         completed_count += 1
                         t["in_sprint"] = False
@@ -1101,6 +1254,7 @@ class JSONDatabase:
                 "new_sprint": new_sprint,
                 "completed_count": completed_count,
                 "moved_count": moved_count,
+                "planned_activated_count": planned_activated_count,
                 "backlog_count": 0
             }
 
@@ -1587,39 +1741,62 @@ class JSONDatabase:
             }
 
     # ------------------ ANALYTICS / CHARTS ------------------
-    def get_analytics(self) -> Dict[str, Any]:
+    def get_analytics(
+        self,
+        days: Optional[int] = None,
+        date_from: Optional[str] = None,
+        date_to: Optional[str] = None,
+    ) -> Dict[str, Any]:
         with _lock:
             data = self._read_data()
             tasks = data.get("tasks", [])
             sprints = data.get("sprints", [])
             users = data.get("users", [])
+            activities = data.get("activity", [])
 
             by_status = {s: 0 for s in VALID_STATUSES}
+            by_status_sp = {s: 0.0 for s in VALID_STATUSES}
             by_type = {tt: 0 for tt in VALID_TASK_TYPES}
+            by_type_sp = {tt: 0.0 for tt in VALID_TASK_TYPES}
             by_cluster = {"Без кластера": 0, "Эпик": 0, "Сириус": 0}
             total_sp = 0.0
             done_sp = 0.0
+            in_progress_sp = 0.0
+            backlog_sp = 0.0
+            unassigned_tasks = 0
+            unassigned_sp = 0.0
 
             user_map = {u["username"].lower(): u.get("display_name", u["username"]) for u in users}
             by_assignee: Dict[str, Dict[str, Any]] = {}
 
             for t in tasks:
                 st = t.get("status") or "Бэклог"
+                sp = float(t.get("story_points") or 0)
+
                 by_status[st] = by_status.get(st, 0) + 1
+                by_status_sp[st] = round(by_status_sp.get(st, 0.0) + sp, 2)
 
                 tt = t.get("task_type") or "Задача"
                 by_type[tt] = by_type.get(tt, 0) + 1
+                by_type_sp[tt] = round(by_type_sp.get(tt, 0.0) + sp, 2)
 
                 cl = t.get("cluster") or ""
                 cl_label = cl if cl else "Без кластера"
                 by_cluster[cl_label] = by_cluster.get(cl_label, 0) + 1
 
-                sp = float(t.get("story_points") or 0)
                 total_sp += sp
                 if st == "Завершено":
                     done_sp += sp
+                elif st == "В работе":
+                    in_progress_sp += sp
+                elif st == "Бэклог":
+                    backlog_sp += sp
 
                 assignee_raw = t.get("assignee") or ""
+                if not assignee_raw:
+                    unassigned_tasks += 1
+                    unassigned_sp += sp
+
                 a_key = assignee_raw.lower() if assignee_raw else "__unassigned__"
                 if a_key not in by_assignee:
                     by_assignee[a_key] = {
@@ -1628,17 +1805,33 @@ class JSONDatabase:
                         "total": 0,
                         "done": 0,
                         "in_progress": 0,
+                        "backlog": 0,
+                        "other": 0,
                         "sp": 0.0,
                         "done_sp": 0.0,
+                        "in_progress_sp": 0.0,
+                        "backlog_sp": 0.0,
                     }
                 entry = by_assignee[a_key]
                 entry["total"] += 1
-                entry["sp"] += sp
+                entry["sp"] = round(entry["sp"] + sp, 2)
                 if st == "Завершено":
                     entry["done"] += 1
-                    entry["done_sp"] += sp
+                    entry["done_sp"] = round(entry["done_sp"] + sp, 2)
                 elif st == "В работе":
                     entry["in_progress"] += 1
+                    entry["in_progress_sp"] = round(entry["in_progress_sp"] + sp, 2)
+                elif st == "Бэклог":
+                    entry["backlog"] += 1
+                    entry["backlog_sp"] = round(entry["backlog_sp"] + sp, 2)
+                else:
+                    entry["other"] += 1
+
+            for entry in by_assignee.values():
+                entry["remaining_sp"] = round(max(0.0, entry["sp"] - entry["done_sp"]), 2)
+                entry["completion_pct"] = round((entry["done"] / entry["total"]) * 100, 1) if entry["total"] else 0.0
+                entry["sp_completion_pct"] = round((entry["done_sp"] / entry["sp"]) * 100, 1) if entry["sp"] else 0.0
+                entry["avg_sp"] = round(entry["sp"] / entry["total"], 2) if entry["total"] else 0.0
 
             # Sprint velocity
             sprint_stats = []
@@ -1646,33 +1839,85 @@ class JSONDatabase:
                 sid = s["id"]
                 s_tasks = [t for t in tasks if t.get("sprint_id") == sid or (s.get("status") == "active" and t.get("in_sprint"))]
                 s_done = [t for t in s_tasks if t.get("status") == "Завершено"]
+                s_inprog = [t for t in s_tasks if t.get("status") == "В работе"]
+                s_tot_sp = round(sum(float(t.get("story_points") or 0) for t in s_tasks), 2)
+                s_done_sp = round(sum(float(t.get("story_points") or 0) for t in s_done), 2)
                 sprint_stats.append({
                     "id": sid,
                     "name": s["name"],
                     "status": s.get("status"),
                     "total_tasks": len(s_tasks),
                     "done_tasks": len(s_done),
-                    "total_sp": sum(float(t.get("story_points") or 0) for t in s_tasks),
-                    "done_sp": sum(float(t.get("story_points") or 0) for t in s_done),
+                    "in_progress_tasks": len(s_inprog),
+                    "total_sp": s_tot_sp,
+                    "done_sp": s_done_sp,
+                    "completion_pct": round((len(s_done) / len(s_tasks)) * 100, 1) if s_tasks else 0.0,
+                    "sp_completion_pct": round((s_done_sp / s_tot_sp) * 100, 1) if s_tot_sp else 0.0,
+                    "created_at": s.get("created_at"),
+                    "closed_at": s.get("closed_at"),
                 })
 
-            # Last 14 days created vs completed
+            # Dynamic activity date range
             today = datetime.utcnow().date()
-            days = [(today - timedelta(days=i)).isoformat() for i in range(13, -1, -1)]
-            created_day = {d: 0 for d in days}
-            completed_day = {d: 0 for d in days}
+            start_d = None
+            end_d = today
+            if date_to:
+                try:
+                    end_d = datetime.strptime(date_to[:10], "%Y-%m-%d").date()
+                except ValueError:
+                    end_d = today
+            if date_from:
+                try:
+                    start_d = datetime.strptime(date_from[:10], "%Y-%m-%d").date()
+                except ValueError:
+                    start_d = None
+
+            if start_d is None:
+                eff_days = max(1, min(365, int(days or 14)))
+                start_d = end_d - timedelta(days=eff_days - 1)
+
+            if start_d > end_d:
+                start_d, end_d = end_d, start_d
+            if (end_d - start_d).days > 365:
+                start_d = end_d - timedelta(days=365)
+
+            num_days = (end_d - start_d).days + 1
+            day_list = [(start_d + timedelta(days=i)).isoformat() for i in range(num_days)]
+            created_day = {d: 0 for d in day_list}
+            completed_day = {d: 0 for d in day_list}
+            started_day = {d: 0 for d in day_list}
+            completed_sp_day = {d: 0.0 for d in day_list}
+            actions_day = {d: 0 for d in day_list}
+
             for t in tasks:
                 cd = (t.get("created_at") or "")[:10]
                 if cd in created_day:
                     created_day[cd] += 1
+                sd = (t.get("started_at") or "")[:10]
+                if sd in started_day:
+                    started_day[sd] += 1
                 if t.get("status") == "Завершено":
                     fd = (t.get("completed_at") or t.get("updated_at") or "")[:10]
                     if fd in completed_day:
                         completed_day[fd] += 1
+                        completed_sp_day[fd] = round(completed_sp_day[fd] + float(t.get("story_points") or 0), 2)
+
+            for a in activities:
+                ad = (a.get("created_at") or "")[:10]
+                if ad in actions_day:
+                    actions_day[ad] += 1
 
             timeline = [
-                {"date": d, "label": d[5:], "created": created_day[d], "completed": completed_day[d]}
-                for d in days
+                {
+                    "date": d,
+                    "label": d[5:],
+                    "created": created_day[d],
+                    "completed": completed_day[d],
+                    "started": started_day[d],
+                    "completed_sp": completed_sp_day[d],
+                    "actions": actions_day[d],
+                }
+                for d in day_list
             ]
 
             by_id = {t["id"]: t for t in tasks}
@@ -1691,8 +1936,8 @@ class JSONDatabase:
                         "sirius_title": sr["title"] if sr else None,
                         "total_tasks": len(ch),
                         "done_tasks": len(done_ch),
-                        "total_sp": sum(float(x.get("story_points") or 0) for x in ch),
-                        "done_sp": sum(float(x.get("story_points") or 0) for x in done_ch),
+                        "total_sp": round(sum(float(x.get("story_points") or 0) for x in ch), 2),
+                        "done_sp": round(sum(float(x.get("story_points") or 0) for x in done_ch), 2),
                     })
 
             sirius_stats = []
@@ -1710,28 +1955,70 @@ class JSONDatabase:
                         "epics_count": len(ep_list),
                         "total_tasks": len(ch),
                         "done_tasks": len(done_ch),
-                        "total_sp": sum(float(x.get("story_points") or 0) for x in ch),
-                        "done_sp": sum(float(x.get("story_points") or 0) for x in done_ch),
+                        "total_sp": round(sum(float(x.get("story_points") or 0) for x in ch), 2),
+                        "done_sp": round(sum(float(x.get("story_points") or 0) for x in done_ch), 2),
                     })
+
+            total_tasks_cnt = len(tasks)
+            done_tasks_cnt = by_status.get("Завершено", 0)
+            total_sp = round(total_sp, 2)
+            done_sp = round(done_sp, 2)
+            in_progress_sp = round(in_progress_sp, 2)
+            backlog_sp = round(backlog_sp, 2)
+            remaining_sp = round(max(0.0, total_sp - done_sp), 2)
 
             return {
                 "summary": {
-                    "total_tasks": len(tasks),
-                    "done_tasks": by_status.get("Завершено", 0),
+                    "total_tasks": total_tasks_cnt,
+                    "done_tasks": done_tasks_cnt,
                     "in_progress_tasks": by_status.get("В работе", 0),
                     "backlog_tasks": by_status.get("Бэклог", 0),
+                    "not_implemented_tasks": by_status.get("Не реализовано", 0),
+                    "partial_tasks": by_status.get("Реализовано частично", 0),
                     "total_sp": total_sp,
                     "done_sp": done_sp,
+                    "in_progress_sp": in_progress_sp,
+                    "backlog_sp": backlog_sp,
+                    "remaining_sp": remaining_sp,
+                    "completion_rate": round((done_tasks_cnt / total_tasks_cnt) * 100, 1) if total_tasks_cnt else 0.0,
+                    "sp_completion_rate": round((done_sp / total_sp) * 100, 1) if total_sp else 0.0,
+                    "avg_sp_per_task": round(total_sp / total_tasks_cnt, 2) if total_tasks_cnt else 0.0,
+                    "unassigned_tasks": unassigned_tasks,
+                    "unassigned_sp": round(unassigned_sp, 2),
                     "users_count": len(users),
                     "epics_count": len(epics_stats),
                     "sirius_count": len(sirius_stats),
+                    "date_from": start_d.isoformat(),
+                    "date_to": end_d.isoformat(),
+                    "days_count": num_days,
+                    "period_created": sum(created_day.values()),
+                    "period_completed": sum(completed_day.values()),
+                    "period_started": sum(started_day.values()),
+                    "period_completed_sp": round(sum(completed_sp_day.values()), 2),
+                    "period_activity_events": sum(actions_day.values()),
                 },
-                "by_status": [{"label": k, "count": v} for k, v in by_status.items()],
-                "by_type": [{"label": k, "count": v} for k, v in by_type.items()],
+                "by_status": [
+                    {
+                        "label": k,
+                        "count": v,
+                        "sp": by_status_sp.get(k, 0.0),
+                        "pct": round((v / total_tasks_cnt) * 100, 1) if total_tasks_cnt else 0.0,
+                    }
+                    for k, v in by_status.items()
+                ],
+                "by_type": [
+                    {
+                        "label": k,
+                        "count": v,
+                        "sp": by_type_sp.get(k, 0.0),
+                        "pct": round((v / total_tasks_cnt) * 100, 1) if total_tasks_cnt else 0.0,
+                    }
+                    for k, v in by_type.items()
+                ],
                 "by_cluster": [{"label": k, "count": v} for k, v in by_cluster.items()],
                 "epics": epics_stats,
                 "siriuses": sirius_stats,
-                "by_assignee": sorted(by_assignee.values(), key=lambda x: (-x["total"], x["display_name"])),
+                "by_assignee": sorted(by_assignee.values(), key=lambda x: (-x["total"], -x["sp"], x["display_name"])),
                 "sprints": sprint_stats,
                 "timeline": timeline,
             }

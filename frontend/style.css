@@ -5975,3 +5975,424 @@ textarea.form-control {
     min-width: 0;
   }
 }
+
+
+/* ==========================================================================
+   DESKTOP BACKLOG SCROLL FIX (PREVENT BOTTOM ROWS FROM OVERFLOWING/CLIPPING)
+   ========================================================================== */
+#viewBacklog.active {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+#viewBacklog .table-container {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+#viewBacklog .panel-box {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+#viewBacklog .panel-box-header {
+  flex-shrink: 0;
+}
+
+#viewBacklog .panel-box .table-scroll-wrapper {
+  flex: 1;
+  min-height: 0;
+  max-height: none;
+  overflow-y: auto;
+  overflow-x: auto;
+}
+
+/* ==========================================================================
+   PLANNED / NEXT SPRINT & INLINE SPRINT EDITING
+   ========================================================================== */
+.sprint-badge.planned {
+  color: #0369a1;
+  background-color: #e0f2fe;
+  border: 1px solid #bae6fd;
+}
+
+[data-theme="dark"] .sprint-badge.planned {
+  color: #7dd3fc;
+  background-color: rgba(14, 165, 233, 0.16);
+  border-color: rgba(56, 189, 248, 0.35);
+}
+
+.sprint-section-planned {
+  border-style: dashed;
+}
+
+.btn-icon-inline {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 13px;
+  cursor: pointer;
+  transition: color 0.15s ease, background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.btn-icon-inline:hover {
+  color: var(--accent);
+  background-color: var(--bg-surface-hover);
+  border-color: var(--border-default);
+}
+
+.sprint-action-group {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+.btn-sprint-action.next-sprint {
+  border-color: #0284c7;
+  color: #0369a1;
+  background-color: transparent;
+}
+
+.btn-sprint-action.next-sprint:hover {
+  background-color: #e0f2fe;
+}
+
+[data-theme="dark"] .btn-sprint-action.next-sprint {
+  border-color: #38bdf8;
+  color: #7dd3fc;
+}
+
+[data-theme="dark"] .btn-sprint-action.next-sprint:hover {
+  background-color: rgba(56, 189, 248, 0.15);
+}
+
+.btn-sprint-action.in-next-sprint {
+  border-color: #0284c7;
+  color: #0369a1;
+  background-color: #e0f2fe;
+}
+
+[data-theme="dark"] .btn-sprint-action.in-next-sprint {
+  border-color: #38bdf8;
+  color: #7dd3fc;
+  background-color: rgba(56, 189, 248, 0.18);
+}
+
+/* ==========================================================================
+   ENHANCED ANALYTICS: RANGE CONTROLS, SP WORKLOAD, DYNAMIC ACTIVITY
+   ========================================================================== */
+.analytics-toolbar {
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.analytics-range-presets {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 10px;
+}
+
+.analytics-preset-btn.active {
+  background-color: var(--accent);
+  border-color: var(--accent);
+  color: #ffffff;
+}
+
+.analytics-range-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.analytics-date-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--text-muted);
+  margin: 0;
+}
+
+.analytics-date-label input[type="date"] {
+  width: 136px;
+  padding: 3px 8px;
+  font-size: 12px;
+}
+
+.kpi-sub {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 4px;
+  line-height: 1.35;
+}
+
+.chart-card-full {
+  grid-column: 1 / -1;
+}
+
+.chart-bar-row.detailed {
+  grid-template-columns: 145px 1fr 125px;
+}
+
+.chart-bar-row.detailed-wide {
+  grid-template-columns: 145px 1fr 145px;
+}
+
+.chart-bar-val {
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.analytics-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+.analytics-card-head .chart-card-title {
+  margin-bottom: 0;
+}
+
+.activity-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.activity-metric-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--border-default);
+  background: var(--bg-app);
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  user-select: none;
+  transition: opacity 0.15s ease, border-color 0.15s ease;
+}
+
+.activity-metric-pill.inactive {
+  opacity: 0.42;
+}
+
+.activity-summary-strip {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 8px 10px;
+  margin-bottom: 10px;
+  background: var(--bg-app);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.activity-summary-strip b {
+  color: var(--text-main);
+  font-family: var(--font-mono);
+}
+
+.activity-chart-stage {
+  position: relative;
+  width: 100%;
+}
+
+.activity-tooltip {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  pointer-events: none;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  font-size: 11px;
+  color: var(--text-main);
+  min-width: 175px;
+  z-index: 10;
+  display: none;
+}
+
+.activity-tooltip-date {
+  font-weight: 700;
+  margin-bottom: 4px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border-subtle);
+  font-family: var(--font-mono);
+}
+
+.activity-tooltip-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  line-height: 1.5;
+}
+
+.analytics-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.analytics-detail-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.analytics-detail-table th,
+.analytics-detail-table td {
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--border-subtle);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.analytics-detail-table th {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-muted);
+  background: var(--bg-surface-hover);
+}
+
+.analytics-detail-table td.num,
+.analytics-detail-table th.num {
+  text-align: right;
+  font-family: var(--font-mono);
+}
+
+.analytics-detail-table tbody tr:hover {
+  background: var(--bg-surface-hover);
+}
+
+/* ==========================================================================
+   DESKTOP SCRUM BOARD RIGHT SLIDE-OVER TASK DRAWER
+   ========================================================================== */
+.scrum-card {
+  cursor: pointer;
+}
+
+.scrum-card.drawer-selected {
+  border-color: var(--accent) !important;
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.fullpage-view.drawer-mode {
+  left: auto;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: min(680px, 52vw);
+  min-width: 440px;
+  max-width: 100vw;
+  margin: 0;
+  border-left: 1px solid var(--border-strong);
+  box-shadow: -8px 0 28px rgba(0, 0, 0, 0.14);
+  transform: translateX(100%);
+  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.fullpage-view.drawer-mode.drawer-open {
+  transform: translateX(0);
+}
+
+.fullpage-view.drawer-mode #btnBackToList,
+.fullpage-view.drawer-mode .fullpage-header-left > .breadcrumb-separator:first-of-type {
+  display: none !important;
+}
+
+.fullpage-view.drawer-mode .drawer-only-btn {
+  display: inline-flex !important;
+}
+
+.fullpage-view.drawer-mode .fullpage-header {
+  padding: 0 16px;
+}
+
+.fullpage-view.drawer-mode .jira-layout {
+  flex-direction: column;
+  overflow-y: auto;
+  height: auto;
+}
+
+.fullpage-view.drawer-mode .jira-main-column {
+  width: 100%;
+  flex: none;
+  overflow: visible;
+  padding: 18px 20px;
+  border-right: none;
+  border-bottom: 1px solid var(--border-default);
+}
+
+.fullpage-view.drawer-mode .jira-sidebar {
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+  flex: none;
+  overflow: visible;
+  padding: 16px 20px 28px;
+}
+
+.btn-close-drawer {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.btn-close-drawer:hover {
+  background-color: var(--bg-surface-hover);
+  color: var(--text-main);
+  border-color: var(--border-strong);
+}
+
+@media (max-width: 768px) {
+  .fullpage-view.drawer-mode {
+    width: 100vw;
+    min-width: 0;
+    left: 0;
+    border-left: none;
+    box-shadow: none;
+  }
+}

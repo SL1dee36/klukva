@@ -145,6 +145,12 @@ class ReorderRequest(BaseModel):
 class SprintCreateRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=100)
     goal: Optional[str] = ""
+    status: Optional[str] = "active"
+
+
+class SprintUpdateRequest(BaseModel):
+    name: Optional[str] = Field(None, min_length=1, max_length=100)
+    goal: Optional[str] = Field(None, max_length=500)
 
 
 class SprintCloseRequest(BaseModel):
@@ -677,8 +683,13 @@ def mark_all_notifications_read(current_user: Dict = Depends(get_current_user)):
 
 
 @router.get("/analytics")
-def get_analytics(current_user: Dict = Depends(get_current_user)):
-    return db.get_analytics()
+def get_analytics(
+    days: Optional[int] = Query(None, ge=1, le=365),
+    date_from: Optional[str] = Query(None),
+    date_to: Optional[str] = Query(None),
+    current_user: Dict = Depends(get_current_user),
+):
+    return db.get_analytics(days=days, date_from=date_from, date_to=date_to)
 
 
 # ============================================================================
@@ -785,6 +796,38 @@ def toggle_sprint(task_id: int, current_user: Dict = Depends(require_role("membe
     return updated
 
 
+@router.post("/tasks/{task_id}/next-sprint")
+def toggle_next_sprint(task_id: int, current_user: Dict = Depends(require_role("member"))):
+    task = db.get_task_by_id(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Задача не найдена")
+    planned = db.get_planned_sprint()
+    if planned and task.get("sprint_id") == planned["id"] and not bool(task.get("in_sprint", False)):
+        updated = db.update_task(task_id, {"in_sprint": False, "sprint_id": None})
+        db.add_activity(
+            current_user["username"],
+            "task_updated",
+            task["id"],
+            task["key"],
+            task["title"],
+            f"Убрана из следующего спринта «{planned['name']}»",
+        )
+        return updated
+
+    if not planned:
+        planned = db.get_or_create_planned_sprint(created_by=current_user["username"])
+    updated = db.update_task(task_id, {"in_sprint": False, "sprint_id": planned["id"]})
+    db.add_activity(
+        current_user["username"],
+        "task_updated",
+        task["id"],
+        task["key"],
+        task["title"],
+        f"Добавлена в следующий спринт «{planned['name']}»",
+    )
+    return updated
+
+
 # ============================================================================
 # SPRINTS
 # ============================================================================
@@ -798,15 +841,43 @@ def get_active_sprint(current_user: Dict = Depends(get_current_user)):
     return db.get_active_sprint()
 
 
+@router.get("/sprints/planned")
+def get_planned_sprint(current_user: Dict = Depends(get_current_user)):
+    return db.get_planned_sprint()
+
+
 @router.post("/sprints", status_code=201)
 def create_sprint(req: SprintCreateRequest, current_user: Dict = Depends(require_role("manager"))):
+    eff_status = "planned" if (req.status or "active") == "planned" else "active"
     new_sprint = db.create_sprint(
         name=req.name,
         goal=req.goal or "",
-        created_by=current_user["username"]
+        created_by=current_user["username"],
+        status=eff_status,
     )
-    db.add_activity(current_user["username"], "sprint_created", details=f"Запущен спринт «{new_sprint['name']}»")
+    action_label = "Запланирован спринт" if eff_status == "planned" else "Запущен спринт"
+    db.add_activity(current_user["username"], "sprint_created", details=f"{action_label} «{new_sprint['name']}»")
     return new_sprint
+
+
+@router.patch("/sprints/{sprint_id}")
+def update_sprint(
+    sprint_id: int,
+    req: SprintUpdateRequest,
+    current_user: Dict = Depends(require_role("manager")),
+):
+    prev = db.get_sprint_by_id(sprint_id)
+    if not prev:
+        raise HTTPException(status_code=404, detail="Спринт не найден")
+    updated = db.update_sprint(sprint_id, name=req.name, goal=req.goal)
+    if not updated:
+        raise HTTPException(status_code=404, detail="Спринт не найден")
+    db.add_activity(
+        current_user["username"],
+        "sprint_updated",
+        details=f"Обновлён спринт: «{prev.get('name')}» → «{updated['name']}»",
+    )
+    return updated
 
 
 @router.post("/sprints/{sprint_id}/close")
@@ -844,7 +915,15 @@ def update_task(
     if not prev:
         raise HTTPException(status_code=404, detail="Задача не найдена")
     updates = req.model_dump(exclude_unset=True)
-    if "in_sprint" in updates:
+    if "sprint_id" in updates:
+        target_sid = updates["sprint_id"]
+        if target_sid is None:
+            updates["in_sprint"] = False
+        else:
+            target_sprint = db.get_sprint_by_id(target_sid)
+            if target_sprint:
+                updates["in_sprint"] = (target_sprint.get("status") == "active")
+    elif "in_sprint" in updates:
         active = db.get_active_sprint()
         if updates["in_sprint"] and active:
             updates["sprint_id"] = active["id"]

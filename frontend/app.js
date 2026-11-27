@@ -72,9 +72,21 @@ const state = {
   users: [],
   tasks: [],
   activeSprint: null,
+  plannedSprint: null,
+  sprintModalMode: { mode: "create", sprintId: null, status: "active" },
+  analyticsRange: { days: 14, dateFrom: "", dateTo: "" },
+  analyticsActivityMetrics: {
+    created: true,
+    completed: true,
+    started: true,
+    actions: false,
+    completed_sp: false,
+  },
+  lastAnalyticsData: null,
   currentTab: initialTab, // 'backlog' | 'sprints' | 'board' | 'analytics'
   boardFilterOnlyMy: false,
   currentTaskDetail: null,
+  taskDrawerMode: false,
   pendingTotpChallenge: null,
   viewingProfileUsername: null,
   preferences: { theme: "system", ui_style: "standard", accent: "default" },
@@ -401,8 +413,12 @@ initTheme();
 // ---------------- УПРАВЛЕНИЕ СПРИНТОМ ----------------
 async function loadActiveSprint() {
   try {
-    const active = await api("/api/sprints/active");
+    const [active, planned] = await Promise.all([
+      api("/api/sprints/active"),
+      api("/api/sprints/planned").catch(() => null),
+    ]);
     state.activeSprint = (active && active.id) ? active : null;
+    state.plannedSprint = (planned && planned.id) ? planned : null;
     updateSprintUI();
   } catch (err) {
     console.error("Ошибка загрузки активного спринта:", err);
@@ -414,7 +430,11 @@ function updateSprintUI() {
   const sprintGoal = document.getElementById("sprintGoalDisplay");
   const btnClose = document.getElementById("btnCloseSprintInTab");
   const btnCreate = document.getElementById("btnCreateSprintInTab");
+  const btnEditActive = document.getElementById("btnEditActiveSprint");
   const boardSprintName = document.getElementById("boardSprintNameDisplay");
+
+  const nextSprintName = document.getElementById("nextSprintNameDisplay");
+  const nextSprintGoal = document.getElementById("nextSprintGoalDisplay");
 
   if (state.activeSprint) {
     if (sprintName) sprintName.textContent = state.activeSprint.name;
@@ -429,26 +449,86 @@ function updateSprintUI() {
     }
     if (btnCreate) btnCreate.style.display = "none";
     if (btnClose) btnClose.style.display = "inline-flex";
+    if (btnEditActive) btnEditActive.style.display = "inline-flex";
   } else {
     if (sprintName) sprintName.textContent = "Спринт не запущен";
     if (boardSprintName) boardSprintName.textContent = "Спринт не запущен";
     if (sprintGoal) sprintGoal.style.display = "none";
     if (btnCreate) btnCreate.style.display = "inline-flex";
     if (btnClose) btnClose.style.display = "none";
+    if (btnEditActive) btnEditActive.style.display = "none";
+  }
+
+  if (state.plannedSprint) {
+    if (nextSprintName) nextSprintName.textContent = `${state.plannedSprint.name} (Следующий)`;
+    if (nextSprintGoal) {
+      if (state.plannedSprint.goal) {
+        nextSprintGoal.textContent = `Цель: ${state.plannedSprint.goal}`;
+        nextSprintGoal.style.display = "inline-block";
+      } else {
+        nextSprintGoal.style.display = "none";
+      }
+    }
+  } else {
+    if (nextSprintName) nextSprintName.textContent = "Следующий спринт (планирование)";
+    if (nextSprintGoal) nextSprintGoal.style.display = "none";
   }
 }
 
-function openCreateSprintModal() {
-  document.getElementById("formCreateSprint").reset();
-  const input = document.getElementById("inputSprintName");
+function getSuggestedNextSprintName() {
   let nextNum = 1;
   if (state.activeSprint) {
-    const match = state.activeSprint.name.match(/\d+$/);
-    if (match) nextNum = parseInt(match[0], 10) + 1;
+    const match = state.activeSprint.name.match(/(\d+)\s*$/);
+    if (match) {
+      const prefix = state.activeSprint.name.slice(0, match.index);
+      return `${prefix}${parseInt(match[1], 10) + 1}`;
+    }
+    nextNum = 2;
   }
-  input.value = `Спринт ${nextNum}`;
+  return `Спринт ${nextNum}`;
+}
+
+function openCreateSprintModal(status = "active") {
+  const effStatus = status === "planned" ? "planned" : "active";
+  state.sprintModalMode = { mode: "create", sprintId: null, status: effStatus };
+  document.getElementById("formCreateSprint").reset();
+  const titleEl = document.getElementById("modalSprintTitle");
+  const submitEl = document.getElementById("btnSubmitSprint");
+  const input = document.getElementById("inputSprintName");
+
+  if (effStatus === "planned") {
+    if (titleEl) titleEl.textContent = "Планирование следующего спринта";
+    if (submitEl) submitEl.textContent = "Сохранить спринт";
+  } else {
+    if (titleEl) titleEl.textContent = "Создание нового спринта";
+    if (submitEl) submitEl.textContent = "Начать спринт";
+  }
+
+  input.value = getSuggestedNextSprintName();
   document.getElementById("modalCreateSprint").style.display = "flex";
   input.focus();
+  input.select();
+}
+
+function openEditSprintModal(sprint) {
+  if (!sprint || !sprint.id) {
+    openCreateSprintModal("planned");
+    return;
+  }
+  state.sprintModalMode = { mode: "edit", sprintId: sprint.id, status: sprint.status || "active" };
+  document.getElementById("formCreateSprint").reset();
+  const titleEl = document.getElementById("modalSprintTitle");
+  const submitEl = document.getElementById("btnSubmitSprint");
+  const input = document.getElementById("inputSprintName");
+  const goalInput = document.getElementById("inputSprintGoal");
+
+  if (titleEl) titleEl.textContent = "Редактирование спринта";
+  if (submitEl) submitEl.textContent = "Сохранить";
+  input.value = sprint.name || "";
+  goalInput.value = sprint.goal || "";
+  document.getElementById("modalCreateSprint").style.display = "flex";
+  input.focus();
+  input.select();
 }
 
 function closeCreateSprintModal() {
@@ -459,14 +539,25 @@ async function handleCreateSprintSubmit(e) {
   e.preventDefault();
   const name = document.getElementById("inputSprintName").value.trim();
   const goal = document.getElementById("inputSprintGoal").value.trim();
+  const modeInfo = state.sprintModalMode || { mode: "create", sprintId: null, status: "active" };
 
   try {
-    const newSprint = await api("/api/sprints", {
-      method: "POST",
-      body: JSON.stringify({ name, goal })
-    });
-    closeCreateSprintModal();
-    showToast(`Спринт "${newSprint.name}" успешно запущен`);
+    if (modeInfo.mode === "edit" && modeInfo.sprintId) {
+      const updated = await api(`/api/sprints/${modeInfo.sprintId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ name, goal })
+      });
+      closeCreateSprintModal();
+      showToast(`Спринт переименован в "${updated.name}"`);
+    } else {
+      const newSprint = await api("/api/sprints", {
+        method: "POST",
+        body: JSON.stringify({ name, goal, status: modeInfo.status || "active" })
+      });
+      closeCreateSprintModal();
+      const verb = modeInfo.status === "planned" ? "запланирован" : "успешно запущен";
+      showToast(`Спринт "${newSprint.name}" ${verb}`);
+    }
     await loadActiveSprint();
     await loadTasks();
   } catch (err) {
@@ -477,7 +568,10 @@ async function handleCreateSprintSubmit(e) {
 async function handleCloseSprint() {
   if (!state.activeSprint) return;
   const sprintName = state.activeSprint.name;
-  if (!confirm(`Завершить спринт "${sprintName}"?\nВыполненные задачи останутся в истории спринта, а незавершенные переместятся в новый спринт.`)) {
+  const plannedNote = state.plannedSprint
+    ? `\nЗапланированный спринт "${state.plannedSprint.name}" и его задачи автоматически станут активными.`
+    : "\nБудет автоматически создан новый спринт.";
+  if (!confirm(`Завершить спринт "${sprintName}"?\nВыполненные задачи останутся в истории спринта, а незавершенные переместятся в следующий спринт.${plannedNote}`)) {
     return;
   }
 
@@ -486,8 +580,9 @@ async function handleCloseSprint() {
       method: "POST"
     });
     const newSprintName = result.new_sprint ? result.new_sprint.name : "";
-    const movedMsg = newSprintName ? ` Перемещено в "${newSprintName}": ${result.moved_count || 0}.` : "";
-    showToast(`Спринт "${sprintName}" завершен. Выполнено: ${result.completed_count || 0}.${movedMsg}`);
+    const movedMsg = newSprintName ? ` Перенесено в "${newSprintName}": ${result.moved_count || 0}.` : "";
+    const plannedMsg = result.planned_activated_count ? ` Запущено из плана: ${result.planned_activated_count}.` : "";
+    showToast(`Спринт "${sprintName}" завершен. Выполнено: ${result.completed_count || 0}.${movedMsg}${plannedMsg}`);
     await loadActiveSprint();
     await loadTasks();
   } catch (err) {
@@ -949,6 +1044,7 @@ function renderPureBacklog() {
   // 3. Завершенные задачи по умолчанию скрыты в бэклоге (если фильтр статуса не выбран явно как "Завершено")
   const backlogTasks = state.tasks.filter(t => {
     if (t.in_sprint) return false;
+    if (state.plannedSprint && t.sprint_id === state.plannedSprint.id) return false;
     if (t.sprint_id && t.status === "Завершено") return false;
     if (!statusFilter && t.status === "Завершено") return false;
     return true;
@@ -997,6 +1093,9 @@ function renderPureBacklog() {
     const tdAction = document.createElement("td");
     tdAction.style.textAlign = "right";
 
+    const actionGroup = document.createElement("div");
+    actionGroup.className = "sprint-action-group";
+
     const btnSprint = document.createElement("button");
     btnSprint.className = "btn-sprint-action";
     btnSprint.textContent = "+ В спринт";
@@ -1004,19 +1103,31 @@ function renderPureBacklog() {
       e.stopPropagation();
       await toggleSprint(t.id);
     };
-    tdAction.appendChild(btnSprint);
+    actionGroup.appendChild(btnSprint);
+
+    if (state.activeSprint) {
+      const btnNext = document.createElement("button");
+      btnNext.className = "btn-sprint-action next-sprint";
+      btnNext.textContent = "+ След.";
+      btnNext.title = "Добавить в следующий спринт";
+      btnNext.onclick = async (e) => {
+        e.stopPropagation();
+        await toggleNextSprint(t.id);
+      };
+      actionGroup.appendChild(btnNext);
+    }
 
     const btnTake = document.createElement("button");
     btnTake.className = "btn-take-task";
-    btnTake.style.marginLeft = "6px";
     btnTake.textContent = "+";
     btnTake.title = "Взять на себя";
     btnTake.onclick = (e) => {
       e.stopPropagation();
       takeTask(t.id);
     };
-    tdAction.appendChild(btnTake);
+    actionGroup.appendChild(btnTake);
 
+    tdAction.appendChild(actionGroup);
     tr.appendChild(tdAction);
     tbody.appendChild(tr);
   });
@@ -1055,48 +1166,67 @@ function renderSprintsView() {
   updateSprintUI();
 
   const sprintTbody = document.getElementById("sprintTableBody");
+  const nextSprintTbody = document.getElementById("nextSprintTableBody");
   const backlogTbody = document.getElementById("backlogTableBody");
   const sprintEmpty = document.getElementById("sprintEmptyState");
+  const nextSprintEmpty = document.getElementById("nextSprintEmptyState");
   const backlogEmpty = document.getElementById("backlogEmptyState");
   const sprintStats = document.getElementById("sprintStats");
+  const nextSprintStats = document.getElementById("nextSprintStats");
   const backlogSubStats = document.getElementById("backlogSubStats");
 
   sprintTbody.innerHTML = "";
+  if (nextSprintTbody) nextSprintTbody.innerHTML = "";
   backlogTbody.innerHTML = "";
 
+  const plannedId = state.plannedSprint ? state.plannedSprint.id : null;
+
   const sprintTasks = state.tasks.filter(t => Boolean(t.in_sprint));
-  // В секцию бэклога спринтов (для добавления в спринт) попадают только незавершенные задачи вне спринта
+  const nextSprintTasks = plannedId
+    ? state.tasks.filter(t => !t.in_sprint && t.sprint_id === plannedId && t.status !== "Завершено")
+    : [];
+  // В секцию бэклога спринтов попадают только незавершенные задачи вне активного и следующего спринта
   const backlogTasks = state.tasks.filter(t => !t.in_sprint && t.status !== "Завершено" && !t.sprint_id);
 
   let sprintSp = 0;
+  let nextSprintSp = 0;
   let backlogSp = 0;
 
   sprintTasks.forEach(t => {
     if (t.story_points) sprintSp += Number(t.story_points);
-    sprintTbody.appendChild(createDraggableTaskRow(t, true));
+    sprintTbody.appendChild(createDraggableTaskRow(t, "sprint"));
   });
+
+  if (nextSprintTbody) {
+    nextSprintTasks.forEach(t => {
+      if (t.story_points) nextSprintSp += Number(t.story_points);
+      nextSprintTbody.appendChild(createDraggableTaskRow(t, "next-sprint"));
+    });
+  }
 
   backlogTasks.forEach(t => {
     if (t.story_points) backlogSp += Number(t.story_points);
-    backlogTbody.appendChild(createDraggableTaskRow(t, false));
+    backlogTbody.appendChild(createDraggableTaskRow(t, "backlog"));
   });
 
   sprintEmpty.style.display = sprintTasks.length === 0 ? "block" : "none";
+  if (nextSprintEmpty) nextSprintEmpty.style.display = nextSprintTasks.length === 0 ? "block" : "none";
   backlogEmpty.style.display = backlogTasks.length === 0 ? "block" : "none";
 
   sprintStats.textContent = `${sprintTasks.length} ${pluralizeTasks(sprintTasks.length)} • ${sprintSp} SP`;
+  if (nextSprintStats) nextSprintStats.textContent = `${nextSprintTasks.length} ${pluralizeTasks(nextSprintTasks.length)} • ${nextSprintSp} SP`;
   backlogSubStats.textContent = `${backlogTasks.length} ${pluralizeTasks(backlogTasks.length)} • ${backlogSp} SP`;
 
   renderPastSprintsHistory();
   restoreScrollPositions();
 }
 
-function createDraggableTaskRow(task, inSprint) {
+function createDraggableTaskRow(task, zone) {
   const tr = document.createElement("tr");
   tr.className = "draggable-row";
   tr.draggable = true;
   tr.dataset.taskId = String(task.id);
-  tr.dataset.inSprint = inSprint ? "1" : "0";
+  tr.dataset.zone = zone;
 
   // Хэндл для перетаскивания
   const tdDrag = document.createElement("td");
@@ -1141,16 +1271,57 @@ function createDraggableTaskRow(task, inSprint) {
   // Действия
   const tdAction = document.createElement("td");
   tdAction.style.textAlign = "right";
+  const actionGroup = document.createElement("div");
+  actionGroup.className = "sprint-action-group";
 
-  const btnSprint = document.createElement("button");
-  btnSprint.className = `btn-sprint-action ${inSprint ? "in-sprint" : ""}`;
-  btnSprint.textContent = inSprint ? "Из спринта" : "+ В спринт";
-  btnSprint.onclick = async (e) => {
-    e.stopPropagation();
-    await toggleSprint(task.id);
-  };
-  tdAction.appendChild(btnSprint);
+  if (zone === "sprint") {
+    const btnRemove = document.createElement("button");
+    btnRemove.className = "btn-sprint-action in-sprint";
+    btnRemove.textContent = "Из спринта";
+    btnRemove.onclick = async (e) => {
+      e.stopPropagation();
+      await toggleSprint(task.id);
+    };
+    actionGroup.appendChild(btnRemove);
+  } else if (zone === "next-sprint") {
+    const btnToActive = document.createElement("button");
+    btnToActive.className = "btn-sprint-action";
+    btnToActive.textContent = "В текущий";
+    btnToActive.onclick = async (e) => {
+      e.stopPropagation();
+      await toggleSprint(task.id);
+    };
+    actionGroup.appendChild(btnToActive);
 
+    const btnRemoveNext = document.createElement("button");
+    btnRemoveNext.className = "btn-sprint-action in-next-sprint";
+    btnRemoveNext.textContent = "В бэклог";
+    btnRemoveNext.onclick = async (e) => {
+      e.stopPropagation();
+      await toggleNextSprint(task.id);
+    };
+    actionGroup.appendChild(btnRemoveNext);
+  } else {
+    const btnSprint = document.createElement("button");
+    btnSprint.className = "btn-sprint-action";
+    btnSprint.textContent = "+ В спринт";
+    btnSprint.onclick = async (e) => {
+      e.stopPropagation();
+      await toggleSprint(task.id);
+    };
+    actionGroup.appendChild(btnSprint);
+
+    const btnNext = document.createElement("button");
+    btnNext.className = "btn-sprint-action next-sprint";
+    btnNext.textContent = "+ След. спринт";
+    btnNext.onclick = async (e) => {
+      e.stopPropagation();
+      await toggleNextSprint(task.id);
+    };
+    actionGroup.appendChild(btnNext);
+  }
+
+  tdAction.appendChild(actionGroup);
   tr.appendChild(tdAction);
 
   setupRowDragEvents(tr, task);
@@ -1210,19 +1381,24 @@ function setupRowDragEvents(tr, task) {
       targetTbody.insertBefore(draggedRow, tr.nextSibling);
     }
 
-    const targetInSprint = targetTbody.id === "sprintTableBody";
-    await handleSprintDropReorder(draggedTaskId, targetInSprint);
+    let targetZone = "backlog";
+    if (targetTbody.id === "sprintTableBody") targetZone = "sprint";
+    else if (targetTbody.id === "nextSprintTableBody") targetZone = "next-sprint";
+    await handleSprintDropReorder(draggedTaskId, targetZone);
   });
 }
 
 function setupSprintDropZones() {
-  const sprintBox = document.getElementById("sectionSprint");
-  const backlogBox = document.getElementById("sectionBacklog");
+  const zones = [
+    { box: document.getElementById("sectionSprint"), tbodyId: "sprintTableBody", zone: "sprint" },
+    { box: document.getElementById("sectionNextSprint"), tbodyId: "nextSprintTableBody", zone: "next-sprint" },
+    { box: document.getElementById("sectionBacklog"), tbodyId: "backlogTableBody", zone: "backlog" },
+  ];
 
-  [sprintBox, backlogBox].forEach(box => {
+  zones.forEach(({ box, tbodyId, zone }) => {
     if (!box) return;
-    const isSprintZone = box.dataset.dropZone === "sprint";
-    const tbody = isSprintZone ? document.getElementById("sprintTableBody") : document.getElementById("backlogTableBody");
+    const tbody = document.getElementById(tbodyId);
+    if (!tbody) return;
 
     box.addEventListener("dragover", (e) => {
       e.preventDefault();
@@ -1240,21 +1416,40 @@ function setupSprintDropZones() {
 
       if (!e.target.closest("tr.draggable-row")) {
         tbody.appendChild(draggedRow);
-        await handleSprintDropReorder(draggedTaskId, isSprintZone);
+        await handleSprintDropReorder(draggedTaskId, zone);
       }
     });
   });
 }
 
-async function handleSprintDropReorder(taskId, targetInSprint) {
+async function handleSprintDropReorder(taskId, targetZone) {
   try {
     const taskObj = state.tasks.find(t => t.id === taskId);
-    if (taskObj && Boolean(taskObj.in_sprint) !== targetInSprint) {
-      taskObj.in_sprint = targetInSprint;
-      await api(`/api/tasks/${taskId}`, {
-        method: "PATCH",
-        body: JSON.stringify({ in_sprint: targetInSprint })
-      });
+    if (taskObj) {
+      if (targetZone === "sprint") {
+        if (!taskObj.in_sprint) {
+          taskObj.in_sprint = true;
+          await api(`/api/tasks/${taskId}`, {
+            method: "PATCH",
+            body: JSON.stringify({ in_sprint: true })
+          });
+        }
+      } else if (targetZone === "next-sprint") {
+        const alreadyInNext = !taskObj.in_sprint && state.plannedSprint && taskObj.sprint_id === state.plannedSprint.id;
+        if (!alreadyInNext) {
+          await api(`/api/tasks/${taskId}/next-sprint`, { method: "POST" });
+          await loadActiveSprint();
+        }
+      } else {
+        if (taskObj.in_sprint || taskObj.sprint_id) {
+          taskObj.in_sprint = false;
+          taskObj.sprint_id = null;
+          await api(`/api/tasks/${taskId}`, {
+            method: "PATCH",
+            body: JSON.stringify({ in_sprint: false, sprint_id: null })
+          });
+        }
+      }
     }
 
     const allRows = document.querySelectorAll(".tasks-table tbody tr.draggable-row");
@@ -1299,6 +1494,7 @@ async function renderPastSprintsHistory() {
           <div class="past-sprint-left">
             <span class="status-pill status-done">Завершен</span>
             <span class="past-sprint-title">${escapeHtml(s.name)}</span>
+            <button type="button" class="btn-icon-inline past-sprint-edit-btn" title="Переименовать спринт">&#9998;</button>
             ${s.goal ? `<span style="font-size: 12px; color: var(--text-muted);">&mdash; ${escapeHtml(s.goal)}</span>` : ""}
           </div>
           <div class="past-sprint-right">
@@ -1310,6 +1506,13 @@ async function renderPastSprintsHistory() {
           Загрузка задач...
         </div>
       `;
+      const editBtn = card.querySelector(".past-sprint-edit-btn");
+      if (editBtn) {
+        editBtn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          openEditSprintModal(s);
+        });
+      }
       pastList.appendChild(card);
     });
   } catch (err) {
@@ -1480,6 +1683,9 @@ function renderSwimlane(parent, title, username, tasks, columns) {
 function createScrumCard(task) {
   const card = document.createElement("div");
   card.className = "scrum-card";
+  if (state.taskDrawerMode && state.currentTaskDetail && state.currentTaskDetail.id === task.id) {
+    card.classList.add("drawer-selected");
+  }
   card.draggable = true;
   card.dataset.taskId = String(task.id);
 
@@ -1497,16 +1703,22 @@ function createScrumCard(task) {
 
   card.innerHTML = `
     <div class="scrum-card-top">
-      <span class="task-key-link" onclick="openTaskDetail(${task.id})">${task.key}</span>
+      <span class="task-key-link">${task.key}</span>
       ${task.story_points ? `<span class="sp-badge">${task.story_points} SP</span>` : ""}
     </div>
-    <div class="scrum-card-title" onclick="openTaskDetail(${task.id})">${renderTaskTitleHtml(task)}</div>
+    <div class="scrum-card-title">${renderTaskTitleHtml(task)}</div>
     <div class="scrum-card-bottom">
       <div>${renderStatusBadge(task.status)}</div>
       ${avatarHtml}
     </div>
     <select class="form-control select-sm scrum-card-mobile-status" aria-label="Статус задачи">${statusOptions}</select>
   `;
+
+  card.addEventListener("click", (e) => {
+    if (e.target.closest("select, button, a")) return;
+    const isDesktop = window.innerWidth > 768;
+    openTaskDetail(task.id, { drawer: isDesktop });
+  });
 
   const mobileStatusSelect = card.querySelector(".scrum-card-mobile-status");
   if (mobileStatusSelect) {
@@ -1598,12 +1810,29 @@ async function toggleSprint(taskId) {
   }
 }
 
-// ---------------- ПОЛНОЭКРАННЫЙ ПРОСМОТР ЗАДАЧИ ----------------
-async function openTaskDetail(taskId) {
+async function toggleNextSprint(taskId) {
+  try {
+    const updated = await api(`/api/tasks/${taskId}/next-sprint`, { method: "POST" });
+    await loadActiveSprint();
+    const inNext = state.plannedSprint && updated.sprint_id === state.plannedSprint.id && !updated.in_sprint;
+    showToast(inNext
+      ? `Задача ${updated.key} добавлена в следующий спринт (${state.plannedSprint.name})`
+      : `Задача ${updated.key} возвращена в бэклог`);
+    await loadTasks();
+  } catch (err) {
+    showToast(`Ошибка: ${err.message}`);
+  }
+}
+
+// ---------------- ПОЛНОЭКРАННЫЙ ПРОСМОТР И БОКОВАЯ ПАНЕЛЬ ЗАДАЧИ ----------------
+async function openTaskDetail(taskId, options = {}) {
   try {
     if (!state.allTasksForHierarchy) await loadHierarchyContainers();
     const task = await api(`/api/tasks/${taskId}`);
     state.currentTaskDetail = task;
+
+    const useDrawer = Boolean(options.drawer && window.innerWidth > 768);
+    state.taskDrawerMode = useDrawer;
 
     document.getElementById("detailTaskKey").textContent = task.key;
     const typeSlot = document.getElementById("detailTypeBadgeSlot");
@@ -1633,7 +1862,17 @@ async function openTaskDetail(taskId) {
     syncDetailHierarchyFields(task.task_type || "Задача");
     document.getElementById("detailAssignee").value = task.assignee || "";
     document.getElementById("detailSp").value = task.story_points ?? "";
-    document.getElementById("detailInSprint").value = task.in_sprint ? "1" : "0";
+
+    const detailInSprintEl = document.getElementById("detailInSprint");
+    if (detailInSprintEl) {
+      if (task.in_sprint) {
+        detailInSprintEl.value = "1";
+      } else if (state.plannedSprint && task.sprint_id === state.plannedSprint.id) {
+        detailInSprintEl.value = "next";
+      } else {
+        detailInSprintEl.value = "0";
+      }
+    }
 
     const creatorUser = state.users.find(u => u.username.toLowerCase() === (task.created_by || "").toLowerCase());
     document.getElementById("detailCreatedBy").textContent = creatorUser ? `${creatorUser.display_name} (@${task.created_by})` : (task.created_by || "—");
@@ -1657,8 +1896,22 @@ async function openTaskDetail(taskId) {
     loadLinks(taskId);
     loadAttachments(taskId);
 
-    document.getElementById("fullpageTaskDetail").style.display = "flex";
-    window.history.pushState({ page: "task", id: taskId }, "", `/task/${taskId}`);
+    const detailEl = document.getElementById("fullpageTaskDetail");
+    document.querySelectorAll(".scrum-card.drawer-selected").forEach(c => c.classList.remove("drawer-selected"));
+
+    if (useDrawer) {
+      detailEl.classList.add("drawer-mode");
+      detailEl.style.display = "flex";
+      const activeCard = document.querySelector(`.scrum-card[data-task-id="${taskId}"]`);
+      if (activeCard) activeCard.classList.add("drawer-selected");
+      requestAnimationFrame(() => {
+        detailEl.classList.add("drawer-open");
+      });
+    } else {
+      detailEl.classList.remove("drawer-mode", "drawer-open");
+      detailEl.style.display = "flex";
+      window.history.pushState({ page: "task", id: taskId }, "", `/task/${taskId}`);
+    }
   } catch (err) {
     showToast(`Ошибка: ${err.message}`);
   }
@@ -2109,13 +2362,31 @@ function setupLinkListeners() {
 }
 
 function closeTaskDetail() {
-  document.getElementById("fullpageTaskDetail").style.display = "none";
+  const detailEl = document.getElementById("fullpageTaskDetail");
+  if (!detailEl || detailEl.style.display === "none") return;
+
+  const wasDrawer = state.taskDrawerMode;
+  state.taskDrawerMode = false;
   state.currentTaskDetail = null;
-  const currentUrl = new URL(window.location.origin + "/");
-  if (state.currentTab) {
-    currentUrl.searchParams.set("tab", state.currentTab);
+  document.querySelectorAll(".scrum-card.drawer-selected").forEach(c => c.classList.remove("drawer-selected"));
+
+  if (wasDrawer) {
+    detailEl.classList.remove("drawer-open");
+    setTimeout(() => {
+      if (!state.currentTaskDetail) {
+        detailEl.style.display = "none";
+        detailEl.classList.remove("drawer-mode");
+      }
+    }, 180);
+  } else {
+    detailEl.style.display = "none";
+    detailEl.classList.remove("drawer-mode", "drawer-open");
+    const currentUrl = new URL(window.location.origin + "/");
+    if (state.currentTab) {
+      currentUrl.searchParams.set("tab", state.currentTab);
+    }
+    window.history.pushState({ tab: state.currentTab }, "", currentUrl.toString());
   }
-  window.history.pushState({ tab: state.currentTab }, "", currentUrl.toString());
   loadTasks();
 }
 
@@ -2132,7 +2403,7 @@ async function saveTaskDetails() {
   const story_points = spVal !== "" ? parseFloat(spVal) : null;
   const assignee = document.getElementById("detailAssignee").value || null;
   const status = document.getElementById("detailStatus").value;
-  const in_sprint = document.getElementById("detailInSprint").value === "1";
+  const sprintChoice = document.getElementById("detailInSprint").value;
   const task_type = document.getElementById("detailTaskType")?.value || "Задача";
   syncDetailHierarchyFields(task_type);
   const epicRaw = document.getElementById("detailEpicId")?.value || "";
@@ -2143,9 +2414,28 @@ async function saveTaskDetails() {
   const indicator = document.getElementById("saveStatusIndicator");
 
   try {
+    const payload = { story_points, assignee, status, task_type, epic_id, sirius_id };
+    if (sprintChoice === "next") {
+      if (!state.plannedSprint) {
+        const created = await api("/api/sprints", {
+          method: "POST",
+          body: JSON.stringify({ name: getSuggestedNextSprintName(), goal: "", status: "planned" })
+        });
+        state.plannedSprint = created;
+        updateSprintUI();
+      }
+      payload.in_sprint = false;
+      payload.sprint_id = state.plannedSprint.id;
+    } else if (sprintChoice === "1") {
+      payload.in_sprint = true;
+    } else {
+      payload.in_sprint = false;
+      payload.sprint_id = null;
+    }
+
     const updated = await api(`/api/tasks/${state.currentTaskDetail.id}`, {
       method: "PATCH",
-      body: JSON.stringify({ story_points, assignee, status, in_sprint, task_type, epic_id, sirius_id })
+      body: JSON.stringify(payload)
     });
     const refreshed = await api(`/api/tasks/${updated.id}`);
     state.currentTaskDetail = refreshed;
@@ -2551,12 +2841,48 @@ function setupEventListeners() {
     });
   }
 
-  // Модальное окно создания спринта
-  document.getElementById("btnCreateSprintInTab").addEventListener("click", openCreateSprintModal);
+  // Модальное окно создания / редактирования спринта
+  document.getElementById("btnCreateSprintInTab").addEventListener("click", () => openCreateSprintModal("active"));
   document.getElementById("btnCloseSprintInTab").addEventListener("click", handleCloseSprint);
+  document.getElementById("btnEditActiveSprint")?.addEventListener("click", () => {
+    if (state.activeSprint) openEditSprintModal(state.activeSprint);
+  });
+  document.getElementById("btnEditNextSprint")?.addEventListener("click", () => {
+    if (state.plannedSprint) openEditSprintModal(state.plannedSprint);
+    else openCreateSprintModal("planned");
+  });
   document.getElementById("btnCancelSprintModal").addEventListener("click", closeCreateSprintModal);
   document.getElementById("btnCancelSprintModal2").addEventListener("click", closeCreateSprintModal);
   document.getElementById("formCreateSprint").addEventListener("submit", handleCreateSprintSubmit);
+
+  // Правая выдвижная панель задачи на скрам-доске
+  document.getElementById("btnCloseTaskDrawer")?.addEventListener("click", closeTaskDetail);
+  document.getElementById("btnExpandTaskDrawer")?.addEventListener("click", () => {
+    if (state.currentTaskDetail) {
+      openTaskDetail(state.currentTaskDetail.id, { drawer: false });
+    }
+  });
+
+  // Диапазон дат на вкладке Аналитика
+  document.querySelectorAll(".analytics-preset-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const days = parseInt(btn.dataset.days, 10) || 14;
+      state.analyticsRange = { days, dateFrom: "", dateTo: "" };
+      document.querySelectorAll(".analytics-preset-btn").forEach(b => b.classList.toggle("active", b === btn));
+      loadAnalytics();
+    });
+  });
+  document.getElementById("btnApplyAnalyticsRange")?.addEventListener("click", () => {
+    const df = document.getElementById("analyticsDateFrom")?.value || "";
+    const dt = document.getElementById("analyticsDateTo")?.value || "";
+    if (!df && !dt) {
+      loadAnalytics();
+      return;
+    }
+    state.analyticsRange = { days: null, dateFrom: df, dateTo: dt };
+    document.querySelectorAll(".analytics-preset-btn").forEach(b => b.classList.remove("active"));
+    loadAnalytics();
+  });
 
   // Фильтры списка задач
   document.getElementById("filterStatus").addEventListener("change", () => { debouncedSavePosition(); loadTasks(); });
@@ -2761,6 +3087,9 @@ function setupEventListeners() {
 }
 
 function switchTab(tab, updateUrl = true) {
+  if (state.taskDrawerMode && tab !== "board") {
+    closeTaskDetail();
+  }
   state.currentTab = tab;
   localStorage.setItem("klukva_active_tab", tab);
   debouncedSavePosition();
@@ -3404,15 +3733,53 @@ async function loadAnalytics() {
   const chartsGrid = document.getElementById("analyticsChartsGrid");
   if (!kpiGrid || !chartsGrid) return;
   try {
-    const data = await api("/api/analytics");
+    const params = new URLSearchParams();
+    if (state.analyticsRange.dateFrom) params.set("date_from", state.analyticsRange.dateFrom);
+    if (state.analyticsRange.dateTo) params.set("date_to", state.analyticsRange.dateTo);
+    if (!state.analyticsRange.dateFrom && !state.analyticsRange.dateTo && state.analyticsRange.days) {
+      params.set("days", String(state.analyticsRange.days));
+    }
+    const qs = params.toString();
+    const data = await api(`/api/analytics${qs ? `?${qs}` : ""}`);
+    state.lastAnalyticsData = data;
     const s = data.summary || {};
+
+    const fromInput = document.getElementById("analyticsDateFrom");
+    const toInput = document.getElementById("analyticsDateTo");
+    if (fromInput && s.date_from) fromInput.value = s.date_from;
+    if (toInput && s.date_to) toInput.value = s.date_to;
+
     kpiGrid.innerHTML = `
-      <div class="kpi-card"><div class="kpi-label">Всего задач</div><div class="kpi-val">${s.total_tasks ?? 0}</div></div>
-      <div class="kpi-card"><div class="kpi-label">В работе</div><div class="kpi-val">${s.in_progress_tasks ?? 0}</div></div>
-      <div class="kpi-card"><div class="kpi-label">Завершено</div><div class="kpi-val">${s.done_tasks ?? 0}</div></div>
-      <div class="kpi-card"><div class="kpi-label">В бэклоге</div><div class="kpi-val">${s.backlog_tasks ?? 0}</div></div>
-      <div class="kpi-card"><div class="kpi-label">Story Points (Всего)</div><div class="kpi-val">${s.total_sp ?? 0}</div></div>
-      <div class="kpi-card"><div class="kpi-label">Story Points (Готово)</div><div class="kpi-val">${s.done_sp ?? 0}</div></div>
+      <div class="kpi-card">
+        <div class="kpi-label">Всего задач</div>
+        <div class="kpi-val">${s.total_tasks ?? 0}</div>
+        <div class="kpi-sub">Выполнено: ${s.completion_rate ?? 0}% • Ср. ${s.avg_sp_per_task ?? 0} SP</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">В работе</div>
+        <div class="kpi-val">${s.in_progress_tasks ?? 0}</div>
+        <div class="kpi-sub">${s.in_progress_sp ?? 0} SP в работе</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Завершено</div>
+        <div class="kpi-val">${s.done_tasks ?? 0}</div>
+        <div class="kpi-sub">+${s.period_completed ?? 0} за период (${s.period_completed_sp ?? 0} SP)</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">В бэклоге</div>
+        <div class="kpi-val">${s.backlog_tasks ?? 0}</div>
+        <div class="kpi-sub">${s.backlog_sp ?? 0} SP • Без исп.: ${s.unassigned_tasks ?? 0}</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Story Points</div>
+        <div class="kpi-val">${s.done_sp ?? 0} / ${s.total_sp ?? 0}</div>
+        <div class="kpi-sub">Готово ${s.sp_completion_rate ?? 0}% • Осталось ${s.remaining_sp ?? 0} SP</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Активность (${s.days_count ?? 14} дн.)</div>
+        <div class="kpi-val">${s.period_activity_events ?? 0}</div>
+        <div class="kpi-sub">Создано: ${s.period_created ?? 0} • Начато: ${s.period_started ?? 0}</div>
+      </div>
     `;
 
     const statusColors = {
@@ -3434,14 +3801,18 @@ async function loadAnalytics() {
     };
 
     chartsGrid.innerHTML = [
+      renderTimelineChartCard(data.timeline || [], s),
+      renderAssigneeChartCard(data.by_assignee || []),
+      renderAssigneeSpChartCard(data.by_assignee || []),
       renderBarChartCard("Задачи по статусам", data.by_status || [], statusColors),
       renderBarChartCard("Типы задач и контейнеры", data.by_type || [], typeColors),
-      renderAssigneeChartCard(data.by_assignee || []),
+      renderSprintVelocityCard(data.sprints || []),
       renderHierarchyAnalyticsCard("Прогресс по Сириусам", data.siriuses || [], "sirius"),
       renderHierarchyAnalyticsCard("Прогресс по Эпикам", data.epics || [], "epic"),
-      renderSprintVelocityCard(data.sprints || []),
-      renderTimelineChartCard(data.timeline || [])
+      renderAssigneeDetailTableCard(data.by_assignee || []),
     ].join("");
+
+    bindDynamicActivityInteractions(data.timeline || []);
   } catch (err) {
     chartsGrid.innerHTML = `<div class="links-empty">Ошибка загрузки аналитики: ${escapeHtml(err.message)}</div>`;
   }
@@ -3457,9 +3828,10 @@ function renderHierarchyAnalyticsCard(title, items, kind) {
     const total = Number(item.total_tasks || 0);
     const done = Number(item.done_tasks || 0);
     const pct = total ? Math.round((done / total) * 100) : 0;
+    const spStr = `${item.done_sp ?? 0}/${item.total_sp ?? 0} SP`;
     const extra = kind === "sirius"
-      ? `${item.epics_count || 0} эп. · ${done}/${total} задач`
-      : `${done}/${total} задач${item.sirius_key ? ` · ${escapeHtml(item.sirius_key)}` : ""}`;
+      ? `${item.epics_count || 0} эп. · ${done}/${total} задач · ${spStr}`
+      : `${done}/${total} задач · ${spStr}${item.sirius_key ? ` · ${escapeHtml(item.sirius_key)}` : ""}`;
     return `
       <div class="analytics-progress-row">
         <div class="analytics-progress-head">
@@ -3478,11 +3850,13 @@ function renderBarChartCard(title, items, colors = {}) {
   const rows = items.map(i => {
     const pct = Math.round((i.count / maxVal) * 100);
     const col = colors[i.label] || "var(--accent)";
+    const shareStr = i.pct !== undefined ? ` (${i.pct}%)` : "";
+    const spStr = i.sp !== undefined ? ` · ${i.sp} SP` : "";
     return `
-      <div class="chart-bar-row">
+      <div class="chart-bar-row detailed-wide">
         <div class="chart-bar-label" title="${escapeHtml(i.label)}">${escapeHtml(i.label)}</div>
         <div class="chart-bar-track"><div class="chart-bar-fill" style="width:${pct}%;background:${col};"></div></div>
-        <div class="chart-bar-val">${i.count}</div>
+        <div class="chart-bar-val" title="${i.count} задач${shareStr}${spStr}">${i.count}${shareStr}${spStr}</div>
       </div>
     `;
   }).join("");
@@ -3490,29 +3864,116 @@ function renderBarChartCard(title, items, colors = {}) {
 }
 
 function renderAssigneeChartCard(assignees) {
-  if (!assignees.length) return `<div class="chart-card"><div class="chart-card-title">Нагрузка по исполнителям</div><div class="links-empty">Нет данных</div></div>`;
+  if (!assignees.length) return `<div class="chart-card"><div class="chart-card-title">Нагрузка по исполнителям (задачи)</div><div class="links-empty">Нет данных</div></div>`;
   const maxTotal = Math.max(1, ...assignees.map(a => a.total));
-  const rows = assignees.slice(0, 12).map(a => {
+  const rows = assignees.slice(0, 15).map(a => {
     const pct = Math.round((a.total / maxTotal) * 100);
+    const activePct = Math.round(((a.done + (a.in_progress || 0)) / maxTotal) * 100);
     const donePct = Math.round((a.done / maxTotal) * 100);
+    const compPct = a.completion_pct !== undefined ? `${a.completion_pct}%` : "";
     return `
-      <div class="chart-bar-row">
-        <div class="chart-bar-label" title="${escapeHtml(a.display_name)}">${escapeHtml(a.display_name)}</div>
+      <div class="chart-bar-row detailed" title="${escapeHtml(a.display_name)}: Завершено ${a.done}, В работе ${a.in_progress || 0}, Бэклог ${a.backlog || 0}, Всего ${a.total}">
+        <div class="chart-bar-label">${escapeHtml(a.display_name)}</div>
         <div class="chart-bar-track" style="position:relative;">
-          <div class="chart-bar-fill" style="width:${pct}%;background:#93c5fd;"></div>
+          <div class="chart-bar-fill" style="width:${pct}%;background:#cbd5e1;"></div>
+          <div class="chart-bar-fill" style="width:${activePct}%;background:#3b82f6;position:absolute;top:0;left:0;"></div>
           <div class="chart-bar-fill" style="width:${donePct}%;background:#059669;position:absolute;top:0;left:0;"></div>
         </div>
-        <div class="chart-bar-val">${a.done}/${a.total}</div>
+        <div class="chart-bar-val">${a.done}/${a.total} (${compPct})</div>
       </div>
     `;
   }).join("");
   return `
     <div class="chart-card">
-      <div class="chart-card-title">Нагрузка по исполнителям (готово / всего)</div>
+      <div class="chart-card-title">Нагрузка по исполнителям — задачи</div>
       ${rows}
       <div class="chart-legend">
         <span class="chart-legend-item"><span class="chart-legend-dot" style="background:#059669;"></span>Завершено</span>
-        <span class="chart-legend-item"><span class="chart-legend-dot" style="background:#93c5fd;"></span>Всего</span>
+        <span class="chart-legend-item"><span class="chart-legend-dot" style="background:#3b82f6;"></span>В работе</span>
+        <span class="chart-legend-item"><span class="chart-legend-dot" style="background:#cbd5e1;"></span>Бэклог / прочее</span>
+      </div>
+    </div>
+  `;
+}
+
+function renderAssigneeSpChartCard(assignees) {
+  if (!assignees.length) return `<div class="chart-card"><div class="chart-card-title">Нагрузка по исполнителям — Story Points</div><div class="links-empty">Нет данных</div></div>`;
+  const sortedBySp = [...assignees].sort((a, b) => (b.sp - a.sp) || (b.total - a.total));
+  const maxSp = Math.max(1, ...sortedBySp.map(a => Number(a.sp || 0)));
+  const rows = sortedBySp.slice(0, 15).map(a => {
+    const sp = Number(a.sp || 0);
+    const doneSp = Number(a.done_sp || 0);
+    const inprogSp = Number(a.in_progress_sp || 0);
+    const pct = Math.round((sp / maxSp) * 100);
+    const activePct = Math.round(((doneSp + inprogSp) / maxSp) * 100);
+    const donePct = Math.round((doneSp / maxSp) * 100);
+    const spPct = a.sp_completion_pct !== undefined ? `${a.sp_completion_pct}%` : "";
+    return `
+      <div class="chart-bar-row detailed" title="${escapeHtml(a.display_name)}: Готово ${doneSp} SP, В работе ${inprogSp} SP, Остаток ${a.remaining_sp ?? 0} SP, Всего ${sp} SP">
+        <div class="chart-bar-label">${escapeHtml(a.display_name)}</div>
+        <div class="chart-bar-track" style="position:relative;">
+          <div class="chart-bar-fill" style="width:${pct}%;background:#ddd6fe;"></div>
+          <div class="chart-bar-fill" style="width:${activePct}%;background:#7c3aed;position:absolute;top:0;left:0;"></div>
+          <div class="chart-bar-fill" style="width:${donePct}%;background:#059669;position:absolute;top:0;left:0;"></div>
+        </div>
+        <div class="chart-bar-val">${doneSp}/${sp} SP (${spPct})</div>
+      </div>
+    `;
+  }).join("");
+  return `
+    <div class="chart-card">
+      <div class="chart-card-title">Нагрузка по исполнителям — Story Points</div>
+      ${rows}
+      <div class="chart-legend">
+        <span class="chart-legend-item"><span class="chart-legend-dot" style="background:#059669;"></span>Выполнено SP</span>
+        <span class="chart-legend-item"><span class="chart-legend-dot" style="background:#7c3aed;"></span>В работе SP</span>
+        <span class="chart-legend-item"><span class="chart-legend-dot" style="background:#ddd6fe;"></span>Остаток SP</span>
+      </div>
+    </div>
+  `;
+}
+
+function renderAssigneeDetailTableCard(assignees) {
+  if (!assignees.length) return "";
+  const rows = assignees.map(a => `
+    <tr>
+      <td><b>${escapeHtml(a.display_name)}</b></td>
+      <td class="num">${a.total}</td>
+      <td class="num">${a.in_progress ?? 0}</td>
+      <td class="num">${a.done}</td>
+      <td class="num">${a.backlog ?? 0}</td>
+      <td class="num">${a.completion_pct ?? 0}%</td>
+      <td class="num">${a.sp}</td>
+      <td class="num">${a.in_progress_sp ?? 0}</td>
+      <td class="num">${a.done_sp}</td>
+      <td class="num">${a.remaining_sp ?? 0}</td>
+      <td class="num">${a.sp_completion_pct ?? 0}%</td>
+      <td class="num">${a.avg_sp ?? 0}</td>
+    </tr>
+  `).join("");
+  return `
+    <div class="chart-card chart-card-full">
+      <div class="chart-card-title">Детальная сводка по исполнителям</div>
+      <div class="analytics-table-wrap">
+        <table class="analytics-detail-table">
+          <thead>
+            <tr>
+              <th>Исполнитель</th>
+              <th class="num">Всего задач</th>
+              <th class="num">В работе</th>
+              <th class="num">Готово</th>
+              <th class="num">Бэклог</th>
+              <th class="num">% задач</th>
+              <th class="num">Всего SP</th>
+              <th class="num">В работе SP</th>
+              <th class="num">Готово SP</th>
+              <th class="num">Остаток SP</th>
+              <th class="num">% SP</th>
+              <th class="num">Ср. SP</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
       </div>
     </div>
   `;
@@ -3520,8 +3981,8 @@ function renderAssigneeChartCard(assignees) {
 
 function renderSprintVelocityCard(sprints) {
   if (!sprints.length) return `<div class="chart-card"><div class="chart-card-title">Velocity по спринтам (SP)</div><div class="links-empty">Спринты ещё не созданы</div></div>`;
-  const list = sprints.slice(-8);
-  const w = 460, h = 180, padL = 34, padB = 28, padT = 16;
+  const list = sprints.slice(-10);
+  const w = 480, h = 190, padL = 36, padB = 30, padT = 18;
   const maxSp = Math.max(1, ...list.map(s => Math.max(s.total_sp, s.done_sp)));
   const groupW = (w - padL - 10) / list.length;
   const barW = Math.max(8, Math.min(22, groupW * 0.34));
@@ -3531,15 +3992,17 @@ function renderSprintVelocityCard(sprints) {
     const hDone = ((s.done_sp / maxSp) * (h - padB - padT));
     const yTot = h - padB - hTot;
     const yDone = h - padB - hDone;
+    const statusLabel = s.status === "active" ? "Активный" : (s.status === "planned" ? "План" : "Завершен");
+    const tip = `${s.name} (${statusLabel}): ${s.done_sp}/${s.total_sp} SP (${s.sp_completion_pct ?? 0}%), задачи ${s.done_tasks}/${s.total_tasks}`;
     return `
-      <rect x="${x0}" y="${yTot}" width="${barW}" height="${hTot}" fill="#93c5fd"><title>${escapeHtml(s.name)}: Всего ${s.total_sp} SP</title></rect>
-      <rect x="${x0 + barW + 3}" y="${yDone}" width="${barW}" height="${hDone}" fill="#059669"><title>${escapeHtml(s.name)}: Готово ${s.done_sp} SP</title></rect>
+      <rect x="${x0}" y="${yTot}" width="${barW}" height="${hTot}" fill="#93c5fd"><title>${escapeHtml(tip)}</title></rect>
+      <rect x="${x0 + barW + 3}" y="${yDone}" width="${barW}" height="${hDone}" fill="#059669"><title>${escapeHtml(tip)}</title></rect>
       <text x="${x0 + barW}" y="${h - 10}" font-size="10" fill="currentColor" text-anchor="middle">${escapeHtml(s.name.slice(0, 10))}</text>
     `;
   }).join("");
   return `
     <div class="chart-card">
-      <div class="chart-card-title">Velocity по спринтам (SP)</div>
+      <div class="chart-card-title">Velocity по спринтам (SP и задачи)</div>
       <div class="chart-svg-wrap">
         <svg viewBox="0 0 ${w} ${h}" width="100%" height="${h}" style="color: var(--text-muted);">
           <line x1="${padL}" y1="${padT}" x2="${padL}" y2="${h - padB}" stroke="var(--border-default)"/>
@@ -3557,41 +4020,160 @@ function renderSprintVelocityCard(sprints) {
   `;
 }
 
-function renderTimelineChartCard(timeline) {
-  if (!timeline.length) return `<div class="chart-card chart-card-full"><div class="chart-card-title">Динамика за 14 дней</div><div class="links-empty">Нет данных</div></div>`;
-  const w = 960, h = 190, padL = 32, padR = 16, padT = 16, padB = 28;
-  const maxV = Math.max(1, ...timeline.map(d => Math.max(d.created, d.completed)));
-  const stepX = (w - padL - padR) / Math.max(1, timeline.length - 1);
-  const pts = (key) => timeline.map((d, i) => {
-    const x = padL + i * stepX;
-    const y = h - padB - (d[key] / maxV) * (h - padB - padT);
-    return `${x.toFixed(1)},${y.toFixed(1)}`;
-  }).join(" ");
-  const labels = timeline.filter((_, i) => i % 2 === 0 || i === timeline.length - 1).map(d => {
-    const idx = timeline.indexOf(d);
-    const x = padL + idx * stepX;
+const ACTIVITY_SERIES_CONFIG = [
+  { key: "created", label: "Создано", color: "#2563eb" },
+  { key: "completed", label: "Завершено", color: "#059669" },
+  { key: "started", label: "Взято в работу", color: "#d97706" },
+  { key: "actions", label: "Действия (лента)", color: "#7c3aed" },
+  { key: "completed_sp", label: "Завершено SP", color: "#0284c7" },
+];
+
+function renderTimelineChartCard(timeline, summary = {}) {
+  const periodTitle = (summary.date_from && summary.date_to)
+    ? `Динамическая активность (${summary.date_from} — ${summary.date_to})`
+    : "Динамическая активность";
+
+  if (!timeline.length) {
+    return `<div class="chart-card chart-card-full"><div class="chart-card-title">${escapeHtml(periodTitle)}</div><div class="links-empty">Нет данных за выбранный период</div></div>`;
+  }
+
+  const activeSeries = ACTIVITY_SERIES_CONFIG.filter(s => state.analyticsActivityMetrics[s.key]);
+  const effectiveSeries = activeSeries.length ? activeSeries : [ACTIVITY_SERIES_CONFIG[0]];
+
+  const w = 960, h = 220, padL = 38, padR = 18, padT = 18, padB = 30;
+  const maxV = Math.max(
+    1,
+    ...timeline.map(d => Math.max(...effectiveSeries.map(s => Number(d[s.key] || 0))))
+  );
+  const stepX = timeline.length > 1 ? (w - padL - padR) / (timeline.length - 1) : 0;
+
+  const gridLines = [0.25, 0.5, 0.75, 1].map(frac => {
+    const y = h - padB - frac * (h - padB - padT);
+    const val = Math.round(maxV * frac * 10) / 10;
+    return `
+      <line x1="${padL}" y1="${y.toFixed(1)}" x2="${w - padR}" y2="${y.toFixed(1)}" stroke="var(--border-subtle)" stroke-dasharray="3,3"/>
+      <text x="${padL - 5}" y="${(y + 3).toFixed(1)}" font-size="10" fill="currentColor" text-anchor="end">${val}</text>
+    `;
+  }).join("");
+
+  const polylines = effectiveSeries.map(series => {
+    const pts = timeline.map((d, i) => {
+      const x = timeline.length > 1 ? (padL + i * stepX) : (padL + (w - padL - padR) / 2);
+      const y = h - padB - (Number(d[series.key] || 0) / maxV) * (h - padB - padT);
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    }).join(" ");
+    const dots = timeline.length <= 45 ? timeline.map((d, i) => {
+      const x = timeline.length > 1 ? (padL + i * stepX) : (padL + (w - padL - padR) / 2);
+      const y = h - padB - (Number(d[series.key] || 0) / maxV) * (h - padB - padT);
+      return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="2.6" fill="${series.color}"/>`;
+    }).join("") : "";
+    return `<polyline fill="none" stroke="${series.color}" stroke-width="2" points="${pts}"/>${dots}`;
+  }).join("");
+
+  const labelStep = Math.max(1, Math.ceil(timeline.length / 12));
+  const labels = timeline.map((d, i) => {
+    if (i % labelStep !== 0 && i !== timeline.length - 1) return "";
+    const x = timeline.length > 1 ? (padL + i * stepX) : (padL + (w - padL - padR) / 2);
     return `<text x="${x.toFixed(1)}" y="${h - 10}" font-size="10" fill="currentColor" text-anchor="middle">${escapeHtml(d.label)}</text>`;
   }).join("");
+
+  const hitZones = timeline.map((d, i) => {
+    const x = timeline.length > 1 ? (padL + i * stepX) : (padL + (w - padL - padR) / 2);
+    const zoneW = timeline.length > 1 ? stepX : (w - padL - padR);
+    const zx = Math.max(padL, x - zoneW / 2);
+    return `<rect class="activity-hover-zone" data-idx="${i}" data-x="${x.toFixed(1)}" x="${zx.toFixed(1)}" y="${padT}" width="${Math.max(4, zoneW).toFixed(1)}" height="${h - padB - padT}" fill="transparent"/>`;
+  }).join("");
+
+  const pillsHtml = ACTIVITY_SERIES_CONFIG.map(s => {
+    const isOn = Boolean(state.analyticsActivityMetrics[s.key]);
+    return `
+      <button type="button" class="activity-metric-pill ${isOn ? "" : "inactive"}" data-metric="${s.key}">
+        <span class="chart-legend-dot" style="background:${s.color};"></span>${escapeHtml(s.label)}
+      </button>
+    `;
+  }).join("");
+
   return `
-    <div class="chart-card chart-card-full">
-      <div class="chart-card-title">Активность за 14 дней (создано / завершено)</div>
-      <div class="chart-svg-wrap">
-        <svg viewBox="0 0 ${w} ${h}" width="100%" height="${h}" style="color: var(--text-muted);">
-          <line x1="${padL}" y1="${padT}" x2="${padL}" y2="${h - padB}" stroke="var(--border-default)"/>
-          <line x1="${padL}" y1="${h - padB}" x2="${w - padR}" y2="${h - padB}" stroke="var(--border-default)"/>
-          <text x="${padL - 4}" y="${padT + 8}" font-size="10" fill="currentColor" text-anchor="end">${maxV}</text>
-          <text x="${padL - 4}" y="${h - padB}" font-size="10" fill="currentColor" text-anchor="end">0</text>
-          <polyline fill="none" stroke="#2563eb" stroke-width="2" points="${pts("created")}"/>
-          <polyline fill="none" stroke="#059669" stroke-width="2" points="${pts("completed")}"/>
-          ${labels}
-        </svg>
+    <div class="chart-card chart-card-full" id="activityChartCard">
+      <div class="analytics-card-head">
+        <div class="chart-card-title">${escapeHtml(periodTitle)}</div>
+        <div class="activity-controls" id="activityMetricControls">${pillsHtml}</div>
       </div>
-      <div class="chart-legend">
-        <span class="chart-legend-item"><span class="chart-legend-dot" style="background:#2563eb;"></span>Создано</span>
-        <span class="chart-legend-item"><span class="chart-legend-dot" style="background:#059669;"></span>Завершено</span>
+      <div class="activity-summary-strip">
+        <span>Создано: <b>${summary.period_created ?? 0}</b></span>
+        <span>Взято в работу: <b>${summary.period_started ?? 0}</b></span>
+        <span>Завершено: <b>${summary.period_completed ?? 0}</b></span>
+        <span>Завершено SP: <b>${summary.period_completed_sp ?? 0}</b></span>
+        <span>Событий в ленте: <b>${summary.period_activity_events ?? 0}</b></span>
+      </div>
+      <div class="activity-chart-stage">
+        <div class="activity-tooltip" id="activityTooltip"></div>
+        <div class="chart-svg-wrap">
+          <svg id="activityChartSvg" viewBox="0 0 ${w} ${h}" width="100%" height="${h}" style="color: var(--text-muted);">
+            ${gridLines}
+            <line x1="${padL}" y1="${padT}" x2="${padL}" y2="${h - padB}" stroke="var(--border-default)"/>
+            <line x1="${padL}" y1="${h - padB}" x2="${w - padR}" y2="${h - padB}" stroke="var(--border-default)"/>
+            <text x="${padL - 5}" y="${h - padB}" font-size="10" fill="currentColor" text-anchor="end">0</text>
+            <line id="activityCrosshair" x1="0" y1="${padT}" x2="0" y2="${h - padB}" stroke="var(--accent)" stroke-width="1" stroke-dasharray="3,2" style="display:none;"/>
+            ${polylines}
+            ${labels}
+            ${hitZones}
+          </svg>
+        </div>
       </div>
     </div>
   `;
+}
+
+function bindDynamicActivityInteractions(timeline) {
+  const controls = document.getElementById("activityMetricControls");
+  if (controls) {
+    controls.querySelectorAll(".activity-metric-pill").forEach(pill => {
+      pill.addEventListener("click", () => {
+        const key = pill.dataset.metric;
+        state.analyticsActivityMetrics[key] = !state.analyticsActivityMetrics[key];
+        const anyOn = Object.values(state.analyticsActivityMetrics).some(Boolean);
+        if (!anyOn) state.analyticsActivityMetrics[key] = true;
+        const card = document.getElementById("activityChartCard");
+        if (card && state.lastAnalyticsData) {
+          card.outerHTML = renderTimelineChartCard(state.lastAnalyticsData.timeline || [], state.lastAnalyticsData.summary || {});
+          bindDynamicActivityInteractions(state.lastAnalyticsData.timeline || []);
+        }
+      });
+    });
+  }
+
+  const svg = document.getElementById("activityChartSvg");
+  const tooltip = document.getElementById("activityTooltip");
+  const crosshair = document.getElementById("activityCrosshair");
+  if (!svg || !tooltip || !timeline.length) return;
+
+  svg.querySelectorAll(".activity-hover-zone").forEach(zone => {
+    zone.addEventListener("mouseenter", () => {
+      const idx = parseInt(zone.dataset.idx, 10);
+      const d = timeline[idx];
+      if (!d) return;
+      if (crosshair) {
+        crosshair.setAttribute("x1", zone.dataset.x);
+        crosshair.setAttribute("x2", zone.dataset.x);
+        crosshair.style.display = "block";
+      }
+      tooltip.innerHTML = `
+        <div class="activity-tooltip-date">${escapeHtml(d.date)}</div>
+        <div class="activity-tooltip-row"><span>Создано:</span><b>${d.created}</b></div>
+        <div class="activity-tooltip-row"><span>Взято в работу:</span><b>${d.started ?? 0}</b></div>
+        <div class="activity-tooltip-row"><span>Завершено:</span><b>${d.completed}</b></div>
+        <div class="activity-tooltip-row"><span>Завершено SP:</span><b>${d.completed_sp ?? 0}</b></div>
+        <div class="activity-tooltip-row"><span>Событий:</span><b>${d.actions ?? 0}</b></div>
+      `;
+      tooltip.style.display = "block";
+    });
+  });
+
+  svg.addEventListener("mouseleave", () => {
+    tooltip.style.display = "none";
+    if (crosshair) crosshair.style.display = "none";
+  });
 }
 
 // ============================================================================

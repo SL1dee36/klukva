@@ -190,7 +190,7 @@
                     <th style="width: 80px; text-align: center;">SP</th>
                     <th style="width: 180px;">Исполнитель</th>
                     <th style="width: 150px;">Статус</th>
-                    <th style="width: 140px; text-align: right;">Действия</th>
+                    <th style="width: 220px; text-align: right;">Действия</th>
                   </tr>
                 </thead>
                 <tbody id="pureBacklogTableBody"></tbody>
@@ -226,6 +226,7 @@
                 <span class="sprint-badge" id="sprintBadgeTitle">
                   <span id="sprintNameDisplay">Активный спринт</span>
                 </span>
+                <button type="button" class="btn-icon-inline" id="btnEditActiveSprint" title="Редактировать название и цель спринта" style="display: none;">&#9998;</button>
                 <span class="sprint-goal-display" id="sprintGoalDisplay" style="display: none;"></span>
                 <span class="sprint-metrics" id="sprintStats">0 задач • 0 SP</span>
               </div>
@@ -244,26 +245,30 @@
                     <th style="width: 80px; text-align: center;">SP</th>
                     <th style="width: 180px;">Исполнитель</th>
                     <th style="width: 150px;">Статус</th>
-                    <th style="width: 140px; text-align: right;">Действия</th>
+                    <th style="width: 180px; text-align: right;">Действия</th>
                   </tr>
                 </thead>
                 <tbody id="sprintTableBody"></tbody>
               </table>
             </div>
             <div id="sprintEmptyState" class="empty-state-dropzone">
-              В активном спринте пока нет задач. Перетащите задачи из списка ниже или нажмите кнопку "+ Спринт".
+              В активном спринте пока нет задач. Перетащите задачи из списка ниже или нажмите кнопку "+ В спринт".
             </div>
           </div>
 
-          <!-- BACKLOG TASKS TO DRAG INTO SPRINT (DROPZONE) -->
-          <div class="sprint-section-box" id="sectionBacklog" data-drop-zone="backlog">
+          <!-- NEXT / PLANNED SPRINT BOX (DROPZONE) -->
+          <div class="sprint-section-box sprint-section-planned" id="sectionNextSprint" data-drop-zone="next-sprint">
             <div class="sprint-section-header">
               <div class="sprint-header-left">
-                <span class="sprint-badge secondary">Бэклог (доступно для переноса в спринт)</span>
-                <span class="sprint-metrics" id="backlogSubStats">0 задач • 0 SP</span>
+                <span class="sprint-badge planned" id="nextSprintBadgeTitle">
+                  <span id="nextSprintNameDisplay">Следующий спринт (планирование)</span>
+                </span>
+                <button type="button" class="btn-icon-inline" id="btnEditNextSprint" title="Задать или изменить название следующего спринта">&#9998;</button>
+                <span class="sprint-goal-display" id="nextSprintGoalDisplay" style="display: none;"></span>
+                <span class="sprint-metrics" id="nextSprintStats">0 задач • 0 SP</span>
               </div>
               <div class="sprint-header-right">
-                <span class="drag-hint">Перетащите задачу вверх для добавления в спринт</span>
+                <span class="drag-hint">Задачи перейдут в работу после завершения текущего спринта</span>
               </div>
             </div>
 
@@ -277,7 +282,40 @@
                     <th style="width: 80px; text-align: center;">SP</th>
                     <th style="width: 180px;">Исполнитель</th>
                     <th style="width: 150px;">Статус</th>
-                    <th style="width: 140px; text-align: right;">Действия</th>
+                    <th style="width: 180px; text-align: right;">Действия</th>
+                  </tr>
+                </thead>
+                <tbody id="nextSprintTableBody"></tbody>
+              </table>
+            </div>
+            <div id="nextSprintEmptyState" class="empty-state-dropzone">
+              Перетащите сюда задачи из бэклога или нажмите «+ След. спринт», чтобы заранее спланировать следующий спринт.
+            </div>
+          </div>
+
+          <!-- BACKLOG TASKS TO DRAG INTO SPRINT (DROPZONE) -->
+          <div class="sprint-section-box" id="sectionBacklog" data-drop-zone="backlog">
+            <div class="sprint-section-header">
+              <div class="sprint-header-left">
+                <span class="sprint-badge secondary">Бэклог (доступно для переноса в спринт)</span>
+                <span class="sprint-metrics" id="backlogSubStats">0 задач • 0 SP</span>
+              </div>
+              <div class="sprint-header-right">
+                <span class="drag-hint">Перетащите задачу в активный или следующий спринт</span>
+              </div>
+            </div>
+
+            <div class="table-scroll-wrapper">
+              <table class="tasks-table">
+                <thead>
+                  <tr>
+                    <th style="width: 32px; text-align: center;"></th>
+                    <th style="width: 100px;">Ключ</th>
+                    <th>Название задачи</th>
+                    <th style="width: 80px; text-align: center;">SP</th>
+                    <th style="width: 180px;">Исполнитель</th>
+                    <th style="width: 150px;">Статус</th>
+                    <th style="width: 210px; text-align: right;">Действия</th>
                   </tr>
                 </thead>
                 <tbody id="backlogTableBody"></tbody>
@@ -357,12 +395,21 @@
            4. ANALYTICS / CHARTS VIEW
            ================================================================ -->
       <section class="view-section" id="viewAnalytics">
-        <div class="toolbar">
+        <div class="toolbar analytics-toolbar">
           <div class="sprint-view-controls">
-            <span class="panel-title">Аналитика и графики</span>
+            <span class="panel-title">Аналитика и статистика</span>
+            <div class="analytics-range-presets" id="analyticsRangePresets">
+              <button type="button" class="btn btn-secondary btn-sm analytics-preset-btn" data-days="7">7 дн</button>
+              <button type="button" class="btn btn-secondary btn-sm analytics-preset-btn active" data-days="14">14 дн</button>
+              <button type="button" class="btn btn-secondary btn-sm analytics-preset-btn" data-days="30">30 дн</button>
+              <button type="button" class="btn btn-secondary btn-sm analytics-preset-btn" data-days="90">90 дн</button>
+            </div>
           </div>
-          <div class="header-actions">
-            <button type="button" class="btn btn-secondary btn-sm" id="btnRefreshAnalytics">Обновить данные</button>
+          <div class="header-actions analytics-range-controls">
+            <label class="analytics-date-label">С <input type="date" id="analyticsDateFrom" class="form-control input-sm"></label>
+            <label class="analytics-date-label">По <input type="date" id="analyticsDateTo" class="form-control input-sm"></label>
+            <button type="button" class="btn btn-primary btn-sm" id="btnApplyAnalyticsRange">Показать</button>
+            <button type="button" class="btn btn-secondary btn-sm" id="btnRefreshAnalytics">Обновить</button>
           </div>
         </div>
         <div class="analytics-container p-16" id="analyticsContainer">
@@ -454,6 +501,8 @@
         <button class="btn btn-secondary btn-sm" id="btnDetailTakeTask">Взять в работу</button>
         <button class="btn btn-primary btn-sm" id="btnSaveTask">Сохранить</button>
         <span id="saveStatusIndicator" class="status-msg"></span>
+        <button type="button" class="btn btn-ghost btn-sm drawer-only-btn" id="btnExpandTaskDrawer" title="Открыть на весь экран" style="display: none;">&#8599;</button>
+        <button type="button" class="btn-close-drawer drawer-only-btn" id="btnCloseTaskDrawer" title="Закрыть панель" aria-label="Закрыть панель" style="display: none;">&times;</button>
       </div>
     </div>
 
@@ -658,7 +707,8 @@
             <div class="meta-value">
               <select id="detailInSprint" class="form-control select-sm">
                 <option value="0">В бэклоге</option>
-                <option value="1">В спринте</option>
+                <option value="1">В активном спринте</option>
+                <option value="next">В следующем спринте</option>
               </select>
             </div>
           </div>
@@ -1261,12 +1311,12 @@
   </div>
 
   <!-- =========================================================================
-       MODAL: CREATE SPRINT
+       MODAL: CREATE / EDIT SPRINT
        ========================================================================= -->
   <div class="modal-overlay" id="modalCreateSprint" style="display: none;">
     <div class="modal-card">
       <div class="modal-header">
-        <h3 class="modal-title">Создание нового спринта</h3>
+        <h3 class="modal-title" id="modalSprintTitle">Создание нового спринта</h3>
         <button type="button" class="btn-close-modal" id="btnCancelSprintModal">&times;</button>
       </div>
       <form id="formCreateSprint">
