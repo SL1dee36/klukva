@@ -3036,6 +3036,7 @@ function setupEventListeners() {
   document.getElementById("tabAnalytics")?.addEventListener("click", () => switchTab("analytics"));
   document.getElementById("navTabSystem")?.addEventListener("click", () => switchTab("system"));
   document.getElementById("btnRefreshAnalytics")?.addEventListener("click", loadAnalytics);
+  document.getElementById("btnExportAnalyticsCsv")?.addEventListener("click", exportAnalyticsCsv);
 
   setupNotificationListeners();
   setupProfileListeners();
@@ -4074,6 +4075,7 @@ async function loadAnalytics() {
 
     chartsGrid.innerHTML = [
       renderTimelineChartCard(data.timeline || [], s),
+      renderBurndownChartCard(data.burndown),
       renderAssigneeChartCard(data.by_assignee || []),
       renderAssigneeSpChartCard(data.by_assignee || []),
       renderBarChartCard("Задачи по статусам", data.by_status || [], statusColors),
@@ -4088,6 +4090,97 @@ async function loadAnalytics() {
   } catch (err) {
     chartsGrid.innerHTML = `<div class="links-empty">Ошибка загрузки аналитики: ${escapeHtml(err.message)}</div>`;
   }
+}
+
+function renderBurndownChartCard(burndown) {
+  if (!burndown || !burndown.points || !burndown.points.length) {
+    return `<div class="chart-card"><div class="chart-card-title">Burndown активного спринта</div><div class="links-empty">Нет активного спринта</div></div>`;
+  }
+  const ptsList = burndown.points;
+  const w = 480, h = 190, padL = 36, padR = 14, padT = 18, padB = 28;
+  const maxSp = Math.max(1, Number(burndown.total_sp || 0), ...ptsList.map(p => Math.max(p.ideal || 0, p.actual || 0)));
+  const stepX = ptsList.length > 1 ? (w - padL - padR) / (ptsList.length - 1) : 0;
+
+  const idealPts = ptsList.map((p, i) => {
+    const x = padL + i * stepX;
+    const y = h - padB - ((p.ideal / maxSp) * (h - padB - padT));
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(" ");
+
+  const actualPts = ptsList
+    .map((p, i) => ({ p, i }))
+    .filter(x => x.p.actual !== null && x.p.actual !== undefined)
+    .map(({ p, i }) => {
+      const x = padL + i * stepX;
+      const y = h - padB - ((p.actual / maxSp) * (h - padB - padT));
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    }).join(" ");
+
+  const labelStep = Math.max(1, Math.ceil(ptsList.length / 7));
+  const labels = ptsList.map((p, i) => {
+    if (i % labelStep !== 0 && i !== ptsList.length - 1) return "";
+    const x = padL + i * stepX;
+    return `<text x="${x.toFixed(1)}" y="${h - 10}" font-size="10" fill="currentColor" text-anchor="middle">${escapeHtml(p.label)}</text>`;
+  }).join("");
+
+  return `
+    <div class="chart-card">
+      <div class="analytics-card-head">
+        <div class="chart-card-title">Burndown: ${escapeHtml(burndown.sprint_name)}</div>
+        <span class="analytics-progress-meta">Осталось ${burndown.remaining_sp} / ${burndown.total_sp} SP</span>
+      </div>
+      <div class="chart-svg-wrap">
+        <svg viewBox="0 0 ${w} ${h}" width="100%" height="${h}" style="color: var(--text-muted);">
+          <line x1="${padL}" y1="${padT}" x2="${padL}" y2="${h - padB}" stroke="var(--border-default)"/>
+          <line x1="${padL}" y1="${h - padB}" x2="${w - padR}" y2="${h - padB}" stroke="var(--border-default)"/>
+          <text x="${padL - 4}" y="${padT + 8}" font-size="10" fill="currentColor" text-anchor="end">${maxSp}</text>
+          <text x="${padL - 4}" y="${h - padB}" font-size="10" fill="currentColor" text-anchor="end">0</text>
+          <polyline fill="none" stroke="#94a3b8" stroke-width="1.8" stroke-dasharray="4,3" points="${idealPts}"/>
+          ${actualPts ? `<polyline fill="none" stroke="var(--accent)" stroke-width="2.2" points="${actualPts}"/>` : ""}
+          ${labels}
+        </svg>
+      </div>
+      <div class="chart-legend">
+        <span class="chart-legend-item"><span class="chart-legend-dot" style="background:#94a3b8;"></span>План (идеал)</span>
+        <span class="chart-legend-item"><span class="chart-legend-dot" style="background:var(--accent);"></span>Факт (остаток SP)</span>
+      </div>
+    </div>
+  `;
+}
+
+function exportAnalyticsCsv() {
+  const data = state.lastAnalyticsData;
+  if (!data) {
+    showToast("Сначала загрузите данные аналитики");
+    return;
+  }
+  const esc = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+  const lines = [];
+  lines.push(["Раздел", "Название", "Всего задач", "В работе", "Готово", "Бэклог", "% задач", "Всего SP", "Готово SP", "Остаток SP", "% SP"].map(esc).join(";"));
+  (data.by_assignee || []).forEach(a => {
+    lines.push([
+      "Исполнитель", a.display_name, a.total, a.in_progress ?? 0, a.done, a.backlog ?? 0,
+      `${a.completion_pct ?? 0}%`, a.sp, a.done_sp, a.remaining_sp ?? 0, `${a.sp_completion_pct ?? 0}%`
+    ].map(esc).join(";"));
+  });
+  (data.sprints || []).forEach(sp => {
+    lines.push([
+      "Спринт", sp.name, sp.total_tasks, sp.in_progress_tasks ?? 0, sp.done_tasks, 0,
+      `${sp.completion_pct ?? 0}%`, sp.total_sp, sp.done_sp, Math.max(0, (sp.total_sp || 0) - (sp.done_sp || 0)), `${sp.sp_completion_pct ?? 0}%`
+    ].map(esc).join(";"));
+  });
+
+  const blob = new Blob(["\uFEFF" + lines.join("\r\n")], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  const stamp = new Date().toISOString().slice(0, 10);
+  a.href = url;
+  a.download = `klukva_analytics_${stamp}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  showToast("Сводка аналитики выгружена в CSV");
 }
 
 function renderHierarchyAnalyticsCard(title, items, kind) {

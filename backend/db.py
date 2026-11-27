@@ -1967,6 +1967,63 @@ class JSONDatabase:
             backlog_sp = round(backlog_sp, 2)
             remaining_sp = round(max(0.0, total_sp - done_sp), 2)
 
+            # Active sprint Burndown Chart
+            burndown = None
+            active_sprint = next((s for s in sprints if s.get("status") == "active"), None)
+            if active_sprint:
+                as_id = active_sprint["id"]
+                as_tasks = [t for t in tasks if t.get("in_sprint") or t.get("sprint_id") == as_id]
+                as_total_sp = round(sum(float(t.get("story_points") or 0) for t in as_tasks), 2)
+                raw_start = (active_sprint.get("started_at") or active_sprint.get("created_at") or today.isoformat())[:10]
+                try:
+                    bd_start = datetime.strptime(raw_start, "%Y-%m-%d").date()
+                except ValueError:
+                    bd_start = today
+                if bd_start > today:
+                    bd_start = today
+                bd_end = max(today, bd_start + timedelta(days=13))
+                if (bd_end - bd_start).days > 60:
+                    bd_start = bd_end - timedelta(days=60)
+                bd_len = (bd_end - bd_start).days + 1
+                done_by_day: Dict[str, float] = {}
+                for t in as_tasks:
+                    if t.get("status") == "Завершено":
+                        fd = (t.get("completed_at") or t.get("updated_at") or "")[:10]
+                        if fd:
+                            done_by_day[fd] = done_by_day.get(fd, 0.0) + float(t.get("story_points") or 0)
+
+                cum_done = 0.0
+                for d_str, d_sp in sorted(done_by_day.items()):
+                    if d_str < bd_start.isoformat():
+                        cum_done += d_sp
+
+                bd_points = []
+                for idx in range(bd_len):
+                    d_obj = bd_start + timedelta(days=idx)
+                    d_str = d_obj.isoformat()
+                    ideal_val = round(as_total_sp * (1.0 - (idx / max(1, bd_len - 1))), 2)
+                    if d_obj <= today:
+                        cum_done += done_by_day.get(d_str, 0.0)
+                        actual_val = round(max(0.0, as_total_sp - cum_done), 2)
+                    else:
+                        actual_val = None
+                    bd_points.append({
+                        "date": d_str,
+                        "label": d_str[5:],
+                        "ideal": ideal_val,
+                        "actual": actual_val,
+                    })
+
+                as_done_sp = round(sum(float(t.get("story_points") or 0) for t in as_tasks if t.get("status") == "Завершено"), 2)
+                burndown = {
+                    "sprint_id": as_id,
+                    "sprint_name": active_sprint.get("name", f"Спринт {as_id}"),
+                    "total_sp": as_total_sp,
+                    "done_sp": as_done_sp,
+                    "remaining_sp": round(max(0.0, as_total_sp - as_done_sp), 2),
+                    "points": bd_points,
+                }
+
             return {
                 "summary": {
                     "total_tasks": total_tasks_cnt,
@@ -2021,6 +2078,7 @@ class JSONDatabase:
                 "by_assignee": sorted(by_assignee.values(), key=lambda x: (-x["total"], -x["sp"], x["display_name"])),
                 "sprints": sprint_stats,
                 "timeline": timeline,
+                "burndown": burndown,
             }
 
 
