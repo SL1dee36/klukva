@@ -5,6 +5,7 @@ FastAPI route handlers for Klukva task tracker.
 import os
 import sys
 import subprocess
+import threading
 import re
 import uuid
 import json
@@ -1847,6 +1848,21 @@ def check_update_status(
     }
 
 
+def _schedule_process_restart(delay_sec: float = 0.8) -> None:
+    """Exit process shortly after returning HTTP response so systemd restarts the service."""
+    t = threading.Timer(delay_sec, lambda: os._exit(0))
+    t.daemon = True
+    t.start()
+
+
+@router.post("/system/restart")
+def restart_server(current_user: Dict = Depends(require_role("admin"))):
+    """Schedules graceful process exit so systemd/supervisor restarts the backend."""
+    db.add_activity(current_user["username"], "system_restart", details="Инициирован перезапуск сервера из UI")
+    _schedule_process_restart(0.8)
+    return {"ok": True, "restarting": True}
+
+
 @router.post("/system/update")
 def trigger_update(
     req: Optional[SystemUpdateRequest] = None,
@@ -1868,6 +1884,9 @@ def trigger_update(
             else f"Ошибка обновления: {res.get('error', '')}"
         ),
     )
+    if res.get("ok") and res.get("updated") and res.get("py_changed") and not getattr(sys, "frozen", False):
+        _schedule_process_restart(0.8)
+        res["restarting"] = True
     return res
 
 

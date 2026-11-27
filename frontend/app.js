@@ -668,6 +668,36 @@ async function checkAppUpdate(silent = false) {
   }
 }
 
+async function waitForServerAndReload(maxWaitMs = 20000) {
+  const startedAt = Date.now();
+  await new Promise(r => setTimeout(r, 1100));
+  while (Date.now() - startedAt < maxWaitMs) {
+    try {
+      const resp = await fetch("/", { cache: "no-store" });
+      if (resp.ok) {
+        window.location.reload();
+        return;
+      }
+    } catch (e) { }
+    await new Promise(r => setTimeout(r, 700));
+  }
+  window.location.reload();
+}
+
+async function handleRestartServer() {
+  if (!confirm("Перезапустить backend-сервер сейчас? Страница автоматически перезагрузится.")) return;
+  const btn = document.getElementById("btnRestartServer");
+  if (btn) btn.disabled = true;
+  try {
+    await api("/api/system/restart", { method: "POST" });
+    showToast("Сервер перезапускается... Ожидание готовности");
+    await waitForServerAndReload();
+  } catch (err) {
+    showToast(`Ошибка перезапуска: ${err.message}`);
+    if (btn) btn.disabled = false;
+  }
+}
+
 async function handleAppUpdate() {
   const btn = document.getElementById("btnAppUpdate");
   const btnSys = document.getElementById("btnSysAppUpdate");
@@ -700,13 +730,15 @@ async function handleAppUpdate() {
       showToast(`Ошибка обновления: ${res.error || "Неизвестная ошибка"}`);
     } else if (res.updated) {
       renderUpdateVersionInfo({ ...res, update_available: false });
-      const pyNote = res.py_changed
-        ? " Обновлён backend (.py) — при необходимости перезапустите сервис на сервере."
-        : "";
-      showToast(`Обновление завершено (${res.current?.short_sha || "ok"}). БД и данные сохранены.${pyNote} Перезагрузка...`);
+      if (res.restarting) {
+        showToast(`Обновление завершено (${res.current?.short_sha || "ok"}). Сервер перезапускается...`);
+        await waitForServerAndReload();
+        return;
+      }
+      showToast(`Обновление завершено (${res.current?.short_sha || "ok"}). БД и данные сохранены. Перезагрузка...`);
       setTimeout(() => {
         window.location.reload();
-      }, 1600);
+      }, 1400);
       return;
     } else {
       renderUpdateVersionInfo({ ...res, update_available: false });
@@ -3063,6 +3095,10 @@ function setupEventListeners() {
   const btnCheckAppUpdate = document.getElementById("btnCheckAppUpdate");
   if (btnCheckAppUpdate) {
     btnCheckAppUpdate.addEventListener("click", () => checkAppUpdate(false));
+  }
+  const btnRestartServer = document.getElementById("btnRestartServer");
+  if (btnRestartServer) {
+    btnRestartServer.addEventListener("click", handleRestartServer);
   }
   const btnAppUpdate = document.getElementById("btnAppUpdate");
   if (btnAppUpdate) {
