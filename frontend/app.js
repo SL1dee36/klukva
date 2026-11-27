@@ -3701,10 +3701,23 @@ function renderNotifications(data) {
     const el = document.createElement("div");
     el.className = `notif-item ${n.read ? "" : "unread"}`;
     el.innerHTML = `
+      <button type="button" class="notif-item-close" title="Убрать уведомление" aria-label="Убрать уведомление">&times;</button>
       <div class="notif-item-title">${escapeHtml(n.title)}</div>
       <div class="notif-item-msg">${escapeHtml(n.message)}</div>
       <div class="notif-item-time">${formatDate(n.created_at)}</div>
     `;
+    const closeBtn = el.querySelector(".notif-item-close");
+    if (closeBtn) {
+      closeBtn.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        try {
+          await api(`/api/notifications/${n.id}`, { method: "DELETE" });
+          await loadNotifications();
+        } catch (err) {
+          showToast(err.message);
+        }
+      });
+    }
     el.onclick = async () => {
       if (!n.read) {
         try {

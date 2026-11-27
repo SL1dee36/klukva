@@ -1600,6 +1600,21 @@ class JSONDatabase:
                 self._atomic_write(data)
             return changed
 
+    def delete_notification(self, username: str, notif_id: int) -> bool:
+        with _lock:
+            data = self._read_data()
+            uname = username.lower()
+            notifs = data.get("notifications", [])
+            new_notifs = [
+                n for n in notifs
+                if not (n["id"] == notif_id and (n.get("username") or "").lower() == uname)
+            ]
+            if len(new_notifs) < len(notifs):
+                data["notifications"] = new_notifs
+                self._atomic_write(data)
+                return True
+            return False
+
     # ------------------ ACTIVITY LOG ------------------
     def add_activity(
         self,

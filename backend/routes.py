@@ -690,6 +690,14 @@ def mark_all_notifications_read(current_user: Dict = Depends(get_current_user)):
     return {"ok": True, "marked": count}
 
 
+@router.delete("/notifications/{notif_id}")
+def delete_notification(notif_id: int, current_user: Dict = Depends(get_current_user)):
+    ok = db.delete_notification(current_user["username"], notif_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Уведомление не найдено")
+    return {"ok": True}
+
+
 @router.get("/analytics")
 def get_analytics(
     days: Optional[int] = Query(None, ge=1, le=365),
