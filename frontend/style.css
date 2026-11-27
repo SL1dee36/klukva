@@ -3862,9 +3862,9 @@ textarea.form-control {
 .accent-default-dot {
   width: 16px;
   height: 16px;
-  border-radius: 50%;
+  border-radius: 100%;
   background: linear-gradient(135deg, #be123c 50%, #ffe4eb 50%);
-  border: 1px solid rgba(0, 0, 0, 0.18);
+  border: 1px solid rgba(0, 0, 0, 1);
   flex-shrink: 0;
 }
 
@@ -6406,7 +6406,7 @@ body.board-drawer-resizing .fullpage-view.drawer-mode .drawer-resizer::after {
 }
 
 .fullpage-view.drawer-mode #btnBackFromDetail,
-.fullpage-view.drawer-mode .fullpage-header-left > .breadcrumb-separator:first-of-type {
+.fullpage-view.drawer-mode .fullpage-header-left>.breadcrumb-separator:first-of-type {
   display: none !important;
 }
 
