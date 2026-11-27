@@ -60,7 +60,10 @@
         </button>
         <div class="notif-wrapper" id="notifWrapper" style="display: none;">
           <button type="button" class="btn btn-secondary btn-sm notif-btn" id="btnNotifications" title="Уведомления">
-            <span class="notif-btn-icon" aria-hidden="true">🔔</span>
+            <svg class="notif-btn-icon" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/>
+              <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>
+            </svg>
             <span class="notif-btn-text">Уведомления</span>
             <span class="notif-badge" id="notifBadge" style="display: none;">0</span>
           </button>
@@ -432,7 +435,15 @@
             </div>
           </div>
           <div class="header-actions">
-            <button type="button" class="btn btn-secondary btn-sm" id="btnSysAppUpdate" title="Обновить программу из репозитория GitHub">🔄 Обновить из Git</button>
+            <button type="button" class="btn btn-secondary btn-sm" id="btnSysAppUpdate" title="Обновить программу из репозитория GitHub">
+              <svg class="btn-update-svg" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
+                <path d="M3 3v5h5"/>
+                <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/>
+                <path d="M16 16h5v5"/>
+              </svg>
+              <span class="btn-sys-update-text">Обновить из Git</span>
+            </button>
             <button type="button" class="btn btn-secondary btn-sm" id="btnSysExportDb">Скачать БД (JSON)</button>
             <button type="button" class="btn btn-secondary btn-sm" id="btnSysRefresh">Обновить</button>
           </div>
@@ -486,6 +497,7 @@
        FULL-PAGE VIEW: TASK DETAILS (JIRA STYLE)
        ========================================================================= -->
   <div class="fullpage-view" id="fullpageTaskDetail" style="display: none;">
+    <div class="drawer-resizer" id="drawerResizer" title="Потяните, чтобы изменить ширину панели"></div>
     <div class="fullpage-header">
       <div class="fullpage-header-left">
         <button class="btn btn-ghost btn-back" id="btnBackFromDetail">
@@ -637,6 +649,12 @@
       <aside class="jira-sidebar">
         <div class="sidebar-section">
           <h4 class="sidebar-section-title">Сведения о задаче</h4>
+
+          <div class="sidebar-badges-row" id="sidebarBadgesRow">
+            <span id="sidebarTypeBadgeSlot"></span>
+            <span id="sidebarClusterBadgeSlot"></span>
+            <span id="sidebarStatusBadgeSlot"></span>
+          </div>
 
           <div class="meta-field">
             <label class="meta-label" for="detailStatus">Статус</label>
@@ -1165,8 +1183,13 @@
                 <button type="button" class="btn btn-secondary btn-sm" id="btnCheckAppUpdate" title="Проверить наличие новой версии на GitHub">
                   Проверить версию
                 </button>
-                <button type="button" class="btn btn-secondary btn-sm" id="btnAppUpdate" title="Обновить программу с GitHub (без потери БД и вложений)">
-                  <span id="btnUpdateIcon">🔄</span>
+                <button type="button" class="btn btn-primary btn-sm" id="btnAppUpdate" title="Обновить программу с GitHub (без потери БД и вложений)" style="display: none;">
+                  <svg id="btnUpdateIcon" class="btn-update-svg" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
+                    <path d="M3 3v5h5"/>
+                    <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/>
+                    <path d="M16 16h5v5"/>
+                  </svg>
                   <span id="btnUpdateText">Обновить</span>
                 </button>
               </div>

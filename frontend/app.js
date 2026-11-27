@@ -630,8 +630,8 @@ function renderUpdateVersionInfo(res) {
   }
 
   if (btnUpdate) {
-    btnUpdate.classList.toggle("btn-primary", Boolean(res.ok && res.update_available));
-    btnUpdate.classList.toggle("btn-secondary", !Boolean(res.ok && res.update_available));
+    const showUpdate = Boolean(res.ok && res.update_available);
+    btnUpdate.style.display = showUpdate ? "inline-flex" : "none";
   }
 }
 
@@ -681,7 +681,8 @@ async function handleAppUpdate() {
   if (btn) btn.disabled = true;
   if (btnSys) {
     btnSys.disabled = true;
-    btnSys.textContent = "Обновление...";
+    const lbl = btnSys.querySelector(".btn-sys-update-text");
+    if (lbl) lbl.textContent = "Обновление...";
   }
   if (icon) icon.classList.add("spinning");
   if (text) text.textContent = "Обновление...";
@@ -717,7 +718,8 @@ async function handleAppUpdate() {
     if (btn) btn.disabled = false;
     if (btnSys) {
       btnSys.disabled = false;
-      btnSys.textContent = "🔄 Обновить из Git";
+      const lbl = btnSys.querySelector(".btn-sys-update-text");
+      if (lbl) lbl.textContent = "Обновить из Git";
     }
     if (icon) icon.classList.remove("spinning");
     if (text) text.textContent = "Обновить";
@@ -1807,8 +1809,13 @@ function createScrumCard(task) {
     <select class="form-control select-sm scrum-card-mobile-status" aria-label="Статус задачи">${statusOptions}</select>
   `;
 
+  card.querySelector(".task-key-link")?.addEventListener("click", (e) => {
+    e.stopPropagation();
+    openTaskDetail(task.id, { drawer: false });
+  });
+
   card.addEventListener("click", (e) => {
-    if (e.target.closest("select, button, a")) return;
+    if (e.target.closest("select, button, a, .task-key-link")) return;
     const isDesktop = window.innerWidth > 768;
     openTaskDetail(task.id, { drawer: isDesktop });
   });
@@ -1917,6 +1924,67 @@ async function toggleNextSprint(taskId) {
   }
 }
 
+function syncTaskDetailBadges(task) {
+  const typeHtml = renderTypeBadge(task.task_type);
+  const clusterHtml = renderParentChip(task);
+  const statusHtml = renderStatusBadge(task.status);
+
+  const typeSlot = document.getElementById("detailTypeBadgeSlot");
+  const clusterSlot = document.getElementById("detailClusterBadgeSlot");
+  const statusSlot = document.getElementById("detailStatusBadgeSlot");
+  if (typeSlot) typeSlot.innerHTML = typeHtml;
+  if (clusterSlot) clusterSlot.innerHTML = clusterHtml;
+  if (statusSlot) statusSlot.innerHTML = statusHtml;
+
+  const sTypeSlot = document.getElementById("sidebarTypeBadgeSlot");
+  const sClusterSlot = document.getElementById("sidebarClusterBadgeSlot");
+  const sStatusSlot = document.getElementById("sidebarStatusBadgeSlot");
+  if (sTypeSlot) sTypeSlot.innerHTML = typeHtml;
+  if (sClusterSlot) sClusterSlot.innerHTML = clusterHtml;
+  if (sStatusSlot) sStatusSlot.innerHTML = statusHtml;
+}
+
+function applyDrawerWidth(px) {
+  const minW = 340;
+  const maxW = Math.max(460, Math.round(window.innerWidth * 0.78));
+  const clamped = Math.max(minW, Math.min(maxW, Math.round(px)));
+  document.documentElement.style.setProperty("--board-drawer-width", `${clamped}px`);
+  return clamped;
+}
+
+function setupDrawerResizer() {
+  const resizer = document.getElementById("drawerResizer");
+  if (!resizer) return;
+  try {
+    const saved = parseInt(localStorage.getItem("klukva_drawer_width") || "", 10);
+    if (!isNaN(saved) && saved >= 340) applyDrawerWidth(saved);
+  } catch (e) { }
+
+  let dragging = false;
+  resizer.addEventListener("mousedown", (e) => {
+    if (!state.taskDrawerMode || window.innerWidth <= 768) return;
+    e.preventDefault();
+    dragging = true;
+    document.body.classList.add("board-drawer-resizing");
+  });
+
+  window.addEventListener("mousemove", (e) => {
+    if (!dragging) return;
+    const newWidth = window.innerWidth - e.clientX;
+    applyDrawerWidth(newWidth);
+  });
+
+  window.addEventListener("mouseup", () => {
+    if (!dragging) return;
+    dragging = false;
+    document.body.classList.remove("board-drawer-resizing");
+    const cur = parseInt(getComputedStyle(document.documentElement).getPropertyValue("--board-drawer-width"), 10);
+    if (!isNaN(cur)) {
+      try { localStorage.setItem("klukva_drawer_width", String(cur)); } catch (e) { }
+    }
+  });
+}
+
 // ---------------- ПОЛНОЭКРАННЫЙ ПРОСМОТР И БОКОВАЯ ПАНЕЛЬ ЗАДАЧИ ----------------
 async function openTaskDetail(taskId, options = {}) {
   try {
@@ -1928,11 +1996,7 @@ async function openTaskDetail(taskId, options = {}) {
     state.taskDrawerMode = useDrawer;
 
     document.getElementById("detailTaskKey").textContent = task.key;
-    const typeSlot = document.getElementById("detailTypeBadgeSlot");
-    const clusterSlot = document.getElementById("detailClusterBadgeSlot");
-    if (typeSlot) typeSlot.innerHTML = renderTypeBadge(task.task_type);
-    if (clusterSlot) clusterSlot.innerHTML = renderParentChip(task);
-    document.getElementById("detailStatusBadgeSlot").innerHTML = renderStatusBadge(task.status);
+    syncTaskDetailBadges(task);
     document.getElementById("displayTitle").textContent = task.title;
     document.getElementById("inputEditTitle").value = task.title;
     document.getElementById("viewTitleBlock").style.display = "flex";
@@ -1993,6 +2057,7 @@ async function openTaskDetail(taskId, options = {}) {
     document.querySelectorAll(".scrum-card.drawer-selected").forEach(c => c.classList.remove("drawer-selected"));
 
     if (useDrawer) {
+      document.body.classList.add("board-drawer-open");
       detailEl.classList.add("drawer-mode");
       detailEl.style.display = "flex";
       const activeCard = document.querySelector(`.scrum-card[data-task-id="${taskId}"]`);
@@ -2001,6 +2066,7 @@ async function openTaskDetail(taskId, options = {}) {
         detailEl.classList.add("drawer-open");
       });
     } else {
+      document.body.classList.remove("board-drawer-open");
       detailEl.classList.remove("drawer-mode", "drawer-open");
       detailEl.style.display = "flex";
       window.history.pushState({ page: "task", id: taskId }, "", `/task/${taskId}`);
@@ -2461,6 +2527,7 @@ function closeTaskDetail() {
   const wasDrawer = state.taskDrawerMode;
   state.taskDrawerMode = false;
   state.currentTaskDetail = null;
+  document.body.classList.remove("board-drawer-open", "board-drawer-resizing");
   document.querySelectorAll(".scrum-card.drawer-selected").forEach(c => c.classList.remove("drawer-selected"));
 
   if (wasDrawer) {
@@ -2532,11 +2599,7 @@ async function saveTaskDetails() {
     });
     const refreshed = await api(`/api/tasks/${updated.id}`);
     state.currentTaskDetail = refreshed;
-    document.getElementById("detailStatusBadgeSlot").innerHTML = renderStatusBadge(refreshed.status);
-    const typeSlot = document.getElementById("detailTypeBadgeSlot");
-    const clusterSlot = document.getElementById("detailClusterBadgeSlot");
-    if (typeSlot) typeSlot.innerHTML = renderTypeBadge(refreshed.task_type);
-    if (clusterSlot) clusterSlot.innerHTML = renderParentChip(refreshed);
+    syncTaskDetailBadges(refreshed);
     renderHierarchyChildren(refreshed);
     indicator.textContent = "Сохранено";
     setTimeout(() => { indicator.textContent = ""; }, 2000);
@@ -2949,6 +3012,7 @@ function setupEventListeners() {
   document.getElementById("formCreateSprint").addEventListener("submit", handleCreateSprintSubmit);
 
   // Правая выдвижная панель задачи на скрам-доске
+  setupDrawerResizer();
   document.getElementById("btnCloseTaskDrawer")?.addEventListener("click", closeTaskDetail);
   document.getElementById("btnExpandTaskDrawer")?.addEventListener("click", () => {
     if (state.currentTaskDetail) {
