@@ -55,6 +55,8 @@ DEFAULT_DB: Dict[str, Any] = {
     "worklogs": [],
     "settings": {
         "tempo_enabled": False,
+        "tempo_daily_hours": 8,
+        "tempo_workdays": 5,
     },
 }
 
@@ -2203,17 +2205,25 @@ class JSONDatabase:
             settings = data.get("settings") or {}
             return {
                 "tempo_enabled": bool(settings.get("tempo_enabled", False)),
+                "tempo_daily_hours": int(settings.get("tempo_daily_hours", 8) or 8),
+                "tempo_workdays": int(settings.get("tempo_workdays", 5) or 5),
             }
 
     def update_system_settings(self, updates: Dict[str, Any]) -> Dict[str, Any]:
         with _lock:
             data = self._read_data()
-            settings = data.setdefault("settings", {"tempo_enabled": False})
+            settings = data.setdefault("settings", {"tempo_enabled": False, "tempo_daily_hours": 8, "tempo_workdays": 5})
             if "tempo_enabled" in updates:
                 settings["tempo_enabled"] = bool(updates["tempo_enabled"])
+            if "tempo_daily_hours" in updates and updates["tempo_daily_hours"] is not None:
+                settings["tempo_daily_hours"] = max(1, min(24, int(updates["tempo_daily_hours"])))
+            if "tempo_workdays" in updates and updates["tempo_workdays"] is not None:
+                settings["tempo_workdays"] = max(1, min(7, int(updates["tempo_workdays"])))
             self._atomic_write(data)
             return {
                 "tempo_enabled": bool(settings.get("tempo_enabled", False)),
+                "tempo_daily_hours": int(settings.get("tempo_daily_hours", 8) or 8),
+                "tempo_workdays": int(settings.get("tempo_workdays", 5) or 5),
             }
 
     def get_worklogs(
@@ -2333,9 +2343,34 @@ class JSONDatabase:
 
         df = start_d.isoformat()
         dt = end_d.isoformat()
+        settings = self.get_system_settings()
+        daily_hours = settings.get("tempo_daily_hours", 8)
+        workdays_cnt = settings.get("tempo_workdays", 5)
+
+        # Calculate working days in selected period
+        num_days = (end_d - start_d).days + 1
+        workdays_in_period = 0
+        for i in range(max(0, num_days)):
+            wd_idx = (start_d + timedelta(days=i)).weekday()  # 0=Mon..6=Sun
+            if wd_idx < workdays_cnt:
+                workdays_in_period += 1
+        expected_minutes_per_user = workdays_in_period * daily_hours * 60
+
         items = self.get_worklogs(username=username, date_from=df, date_to=dt)
 
         by_user: Dict[str, Dict[str, Any]] = {}
+        if not username:
+            for u in self.get_users():
+                u_key = u["username"].lower()
+                by_user[u_key] = {
+                    "username": u["username"],
+                    "display_name": u.get("display_name", u["username"]),
+                    "minutes": 0,
+                    "entries": 0,
+                    "tasks_count": 0,
+                    "_task_ids": set(),
+                }
+
         by_task: Dict[int, Dict[str, Any]] = {}
         by_day: Dict[str, int] = {}
         total_minutes = 0
@@ -2350,9 +2385,13 @@ class JSONDatabase:
                     "display_name": w.get("display_name"),
                     "minutes": 0,
                     "entries": 0,
+                    "tasks_count": 0,
+                    "_task_ids": set(),
                 }
             by_user[u_key]["minutes"] += m
             by_user[u_key]["entries"] += 1
+            if w.get("task_id"):
+                by_user[u_key]["_task_ids"].add(w.get("task_id"))
 
             tid = w.get("task_id")
             if tid not in by_task:
@@ -2370,12 +2409,23 @@ class JSONDatabase:
             if wd:
                 by_day[wd] = by_day.get(wd, 0) + m
 
+        user_list = []
+        for u_entry in by_user.values():
+            tids = u_entry.pop("_task_ids", set())
+            u_entry["tasks_count"] = len(tids)
+            u_entry["expected_minutes"] = expected_minutes_per_user
+            u_entry["pct"] = round((u_entry["minutes"] / expected_minutes_per_user) * 100, 1) if expected_minutes_per_user else 0.0
+            user_list.append(u_entry)
+
         return {
             "date_from": df,
             "date_to": dt,
+            "daily_hours": daily_hours,
+            "workdays": workdays_cnt,
+            "expected_minutes_per_user": expected_minutes_per_user,
             "total_minutes": total_minutes,
             "entries_count": len(items),
-            "by_user": sorted(by_user.values(), key=lambda x: (-x["minutes"], x["display_name"] or "")),
+            "by_user": sorted(user_list, key=lambda x: (-x["minutes"], x["display_name"] or "")),
             "by_task": sorted(by_task.values(), key=lambda x: (-x["minutes"], x["task_id"])),
             "by_day": [{"date": d, "minutes": by_day[d]} for d in sorted(by_day.keys())],
             "items": items,

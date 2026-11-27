@@ -88,9 +88,14 @@ const state = {
   boardHideEmptyLanes: localStorage.getItem("klukva_board_hide_empty") === "1",
   selectedBacklogIds: new Set(),
   tempoEnabled: false,
+  tempoDailyHours: 8,
+  tempoWorkdays: 5,
   tempoWeekStart: null,
   tempoSelectedUser: null,
+  tempoAdminMode: false,
+  tempoAdminRange: { preset: "this_week", dateFrom: "", dateTo: "" },
   lastTempoData: null,
+  lastTempoAdminData: null,
   currentTaskDetail: null,
   taskDrawerMode: false,
   pendingTotpChallenge: null,
@@ -1052,7 +1057,7 @@ function populateAssigneeSelects() {
     document.getElementById("splitAssignee"),
     document.getElementById("filterAssignee"),
     document.getElementById("bulkAssigneeSelect"),
-    document.getElementById("tempoUserFilter")
+    document.getElementById("tempoAdminUserFilter")
   ];
 
   selects.forEach(select => {
@@ -5141,7 +5146,7 @@ async function loadSystemUsers() {
 
 
 // ============================================================================
-// TEMPO (ПЕРСОНАЛЬНЫЙ КАЛЕНДАРЬ УЧЁТА ВРЕМЕНИ, ВКЛЮЧАЕТСЯ АДМИНИСТРАЦИЕЙ)
+// TEMPO (ПЕРСОНАЛЬНЫЙ КАЛЕНДАРЬ + ОТДЕЛЬНАЯ АДМИН-ПАНЕЛЬ ДЛЯ ВСЕХ ПЕРИОДОВ)
 // ============================================================================
 function formatMinutesCompact(mins) {
   const m = Math.max(0, Math.round(Number(mins || 0)));
@@ -5174,11 +5179,18 @@ function applyTempoVisibility() {
   const detailRow = document.getElementById("detailTempoRow");
   const chk = document.getElementById("chkTempoEnabled");
   const lbl = document.getElementById("lblTempoEnabledState");
+  const btnAdmin = document.getElementById("btnTempoOpenAdmin");
 
   if (tabTempo) tabTempo.style.display = enabled ? "inline-flex" : "none";
   if (detailRow && !enabled) detailRow.style.display = "none";
   if (chk) chk.checked = enabled;
   if (lbl) lbl.textContent = enabled ? "Включено" : "Выключено";
+  if (btnAdmin) btnAdmin.style.display = (enabled && hasMinRole("admin")) ? "inline-flex" : "none";
+
+  const hrsInput = document.getElementById("inputTempoDailyHours");
+  const wdSelect = document.getElementById("selectTempoWorkdays");
+  if (hrsInput) hrsInput.value = String(state.tempoDailyHours || 8);
+  if (wdSelect) wdSelect.value = String(state.tempoWorkdays || 5);
 
   if (!enabled && state.currentTab === "tempo") {
     switchTab("backlog");
@@ -5189,6 +5201,8 @@ async function loadSystemSettings() {
   try {
     const s = await api("/api/system/settings");
     state.tempoEnabled = Boolean(s && s.tempo_enabled);
+    state.tempoDailyHours = Number(s?.tempo_daily_hours || 8);
+    state.tempoWorkdays = Number(s?.tempo_workdays || 5);
   } catch (err) {
     state.tempoEnabled = false;
   }
@@ -5228,6 +5242,40 @@ function closeTempoLogModal() {
   if (modal) modal.style.display = "none";
 }
 
+function setTempoAdminMode(isAdminView) {
+  state.tempoAdminMode = Boolean(isAdminView && hasMinRole("admin"));
+  const pView = document.getElementById("tempoPersonalView");
+  const aView = document.getElementById("tempoAdminView");
+  if (pView) pView.style.display = state.tempoAdminMode ? "none" : "flex";
+  if (aView) aView.style.display = state.tempoAdminMode ? "flex" : "none";
+  if (state.tempoAdminMode) {
+    loadTempoAdminView();
+  } else {
+    loadTempoView();
+  }
+}
+
+function computeTempoPresetDates(preset) {
+  const now = new Date();
+  const monday = getMondayOfWeek(now);
+  if (preset === "this_week") {
+    const sun = new Date(monday);
+    sun.setDate(monday.getDate() + 6);
+    return { df: toIsoDateLocal(monday), dt: toIsoDateLocal(sun) };
+  }
+  if (preset === "prev_week") {
+    const prevMon = new Date(monday);
+    prevMon.setDate(monday.getDate() - 7);
+    const prevSun = new Date(prevMon);
+    prevSun.setDate(prevMon.getDate() + 6);
+    return { df: toIsoDateLocal(prevMon), dt: toIsoDateLocal(prevSun) };
+  }
+  const days = preset === "30d" ? 30 : 14;
+  const start = new Date(now);
+  start.setDate(now.getDate() - (days - 1));
+  return { df: toIsoDateLocal(start), dt: toIsoDateLocal(now) };
+}
+
 function setupTempoListeners() {
   const chk = document.getElementById("chkTempoEnabled");
   if (chk) {
@@ -5256,6 +5304,11 @@ function setupTempoListeners() {
     loadTempoView();
   });
 
+  document.getElementById("btnTempoBackToMe")?.addEventListener("click", () => {
+    state.tempoSelectedUser = state.currentUser?.username || null;
+    loadTempoView();
+  });
+
   document.getElementById("btnTempoPrevWeek")?.addEventListener("click", () => {
     const base = state.tempoWeekStart ? new Date(state.tempoWeekStart + "T00:00:00") : getMondayOfWeek(new Date());
     base.setDate(base.getDate() - 7);
@@ -5270,16 +5323,18 @@ function setupTempoListeners() {
     loadTempoView();
   });
 
-  document.getElementById("tempoUserFilter")?.addEventListener("change", (e) => {
-    state.tempoSelectedUser = e.target.value || state.currentUser?.username || null;
-    loadTempoView();
+  document.getElementById("btnTempoOpenAdmin")?.addEventListener("click", () => setTempoAdminMode(true));
+  document.getElementById("btnTempoBackFromAdmin")?.addEventListener("click", () => {
+    state.tempoSelectedUser = state.currentUser?.username || null;
+    setTempoAdminMode(false);
   });
 
   document.getElementById("tempoIssuesSearch")?.addEventListener("input", debounce(renderTempoIssuesSidebar, 150));
   document.getElementById("btnTempoOpenLogModal")?.addEventListener("click", () => openTempoLogModal());
   document.getElementById("btnCloseTempoModal")?.addEventListener("click", closeTempoLogModal);
   document.getElementById("btnCancelTempoModal")?.addEventListener("click", closeTempoLogModal);
-  document.getElementById("btnExportTempoCsv")?.addEventListener("click", exportTempoCsv);
+  document.getElementById("btnExportTempoCsv")?.addEventListener("click", () => exportTempoCsv(state.lastTempoData, "personal"));
+  document.getElementById("btnExportTempoAdminCsv")?.addEventListener("click", () => exportTempoCsv(state.lastTempoAdminData, "team"));
 
   document.getElementById("formTempoModal")?.addEventListener("submit", async (e) => {
     e.preventDefault();
@@ -5301,6 +5356,45 @@ function setupTempoListeners() {
       closeTempoLogModal();
       showToast(`Списано ${formatMinutesCompact(totalMins)}`);
       await loadTempoView();
+    } catch (err) {
+      showToast(`Ошибка: ${err.message}`);
+    }
+  });
+
+  // Admin Tempo panel controls
+  document.querySelectorAll(".tempo-admin-preset").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const preset = btn.dataset.preset || "this_week";
+      const { df, dt } = computeTempoPresetDates(preset);
+      state.tempoAdminRange = { preset, dateFrom: df, dateTo: dt };
+      document.querySelectorAll(".tempo-admin-preset").forEach(b => b.classList.toggle("active", b === btn));
+      loadTempoAdminView();
+    });
+  });
+
+  document.getElementById("btnApplyTempoAdmin")?.addEventListener("click", () => {
+    const df = document.getElementById("tempoAdminDateFrom")?.value || "";
+    const dt = document.getElementById("tempoAdminDateTo")?.value || "";
+    state.tempoAdminRange = { preset: "", dateFrom: df, dateTo: dt };
+    document.querySelectorAll(".tempo-admin-preset").forEach(b => b.classList.remove("active"));
+    loadTempoAdminView();
+  });
+
+  document.getElementById("tempoAdminUserFilter")?.addEventListener("change", loadTempoAdminView);
+
+  document.getElementById("formTempoAdminSettings")?.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const daily_hours = parseInt(document.getElementById("inputTempoDailyHours")?.value || "8", 10) || 8;
+    const workdays = parseInt(document.getElementById("selectTempoWorkdays")?.value || "5", 10) || 5;
+    try {
+      const res = await api("/api/system/settings", {
+        method: "PATCH",
+        body: JSON.stringify({ tempo_daily_hours: daily_hours, tempo_workdays: workdays })
+      });
+      state.tempoDailyHours = res.tempo_daily_hours || 8;
+      state.tempoWorkdays = res.tempo_workdays || 5;
+      showToast("Параметры Tempo сохранены");
+      loadTempoAdminView();
     } catch (err) {
       showToast(`Ошибка: ${err.message}`);
     }
@@ -5375,6 +5469,16 @@ function renderTempoIssuesSidebar() {
 
 async function loadTempoView() {
   if (!state.tempoEnabled) return;
+  if (state.tempoAdminMode && hasMinRole("admin")) {
+    await loadTempoAdminView();
+    return;
+  }
+
+  const pView = document.getElementById("tempoPersonalView");
+  const aView = document.getElementById("tempoAdminView");
+  if (pView) pView.style.display = "flex";
+  if (aView) aView.style.display = "none";
+
   const gridEl = document.getElementById("tempoCalendarGrid");
   if (!gridEl) return;
 
@@ -5392,22 +5496,12 @@ async function loadTempoView() {
   const df = toIsoDateLocal(monday);
   const dt = toIsoDateLocal(sunday);
 
-  // Determine target user (each user sees their own Tempo by default)
   const myUsername = state.currentUser?.username || "";
   if (!state.tempoSelectedUser) state.tempoSelectedUser = myUsername;
+  const viewingOwn = (state.tempoSelectedUser || "").toLowerCase() === myUsername.toLowerCase();
 
-  const userSel = document.getElementById("tempoUserFilter");
-  if (userSel) {
-    if (hasMinRole("manager") && state.users.length > 1) {
-      userSel.style.display = "inline-block";
-      if (!userSel.options.length || userSel.options[0].value === "") {
-        userSel.innerHTML = state.users.map(u => `<option value="${escapeHtml(u.username)}">${escapeHtml(u.display_name || u.username)}</option>`).join("");
-      }
-      userSel.value = state.tempoSelectedUser;
-    } else {
-      userSel.style.display = "none";
-    }
-  }
+  const backToMeBtn = document.getElementById("btnTempoBackToMe");
+  if (backToMeBtn) backToMeBtn.style.display = viewingOwn ? "none" : "inline-flex";
 
   const targetUserObj = state.users.find(u => u.username.toLowerCase() === (state.tempoSelectedUser || "").toLowerCase()) || state.currentUser;
   const nameEl = document.getElementById("tempoUserName");
@@ -5429,34 +5523,30 @@ async function loadTempoView() {
     const data = await api(`/api/tempo/worklogs?${params.toString()}`);
     state.lastTempoData = data;
 
-    const totalEl = document.getElementById("tempoWeekTotalLabel");
-    if (totalEl) totalEl.textContent = `${formatMinutesCompact(data.total_minutes || 0)} / 40ч`;
+    const dailyHours = Number(data.daily_hours || state.tempoDailyHours || 8);
+    const workdaysCnt = Number(data.workdays || state.tempoWorkdays || 5);
+    const weekTargetHours = dailyHours * workdaysCnt;
 
-    const itemsByDay = {};
-    (data.items || []).forEach(w => {
-      const wd = (w.work_date || "").slice(0, 10);
-      itemsByDay[wd] = itemsByDay[wd] || [];
-      itemsByDay[wd].push(w);
-    });
+    const totalEl = document.getElementById("tempoWeekTotalLabel");
+    if (totalEl) totalEl.textContent = `${formatMinutesCompact(data.total_minutes || 0)} / ${weekTargetHours}ч`;
 
     const dayNames = ["пн", "вт", "ср", "чт", "пт", "сб", "вс"];
     const todayIso = toIsoDateLocal(new Date());
     const canManage = hasMinRole("manager");
-    const viewingOwn = (state.tempoSelectedUser || "").toLowerCase() === myUsername.toLowerCase();
 
     gridEl.innerHTML = "";
     for (let i = 0; i < 7; i++) {
       const d = new Date(monday);
       d.setDate(monday.getDate() + i);
       const iso = toIsoDateLocal(d);
-      const isWeekend = i >= 5;
-      const targetMins = isWeekend ? 0 : 480;
+      const isWorkday = i < workdaysCnt;
+      const targetMins = isWorkday ? dailyHours * 60 : 0;
       const dayItems = (data.items || []).filter(w => (w.work_date || "").slice(0, 10) === iso);
       const dayTotal = dayItems.reduce((acc, w) => acc + Number(w.minutes || 0), 0);
       const pct = targetMins > 0 ? Math.min(100, Math.round((dayTotal / targetMins) * 100)) : (dayTotal > 0 ? 100 : 0);
 
       const col = document.createElement("div");
-      col.className = `tempo-day-col ${iso === todayIso ? "is-today" : ""} ${isWeekend ? "is-weekend" : ""}`;
+      col.className = `tempo-day-col ${iso === todayIso ? "is-today" : ""} ${!isWorkday ? "is-weekend" : ""}`;
       col.dataset.date = iso;
 
       const ddMm = `${String(d.getDate()).padStart(2, "0")}.${String(d.getMonth() + 1).padStart(2, "0")}`;
@@ -5464,7 +5554,7 @@ async function loadTempoView() {
         <div class="tempo-day-header">
           <div class="tempo-day-title-row">
             <span class="tempo-day-name">${dayNames[i]} ${ddMm}</span>
-            <span class="tempo-day-hours">${formatMinutesCompact(dayTotal)} из ${isWeekend ? "0ч" : "8ч"}</span>
+            <span class="tempo-day-hours">${formatMinutesCompact(dayTotal)} из ${isWorkday ? `${dailyHours}ч` : "0ч"}</span>
           </div>
           <div class="tempo-day-progress"><div class="tempo-day-progress-fill" style="width: ${pct}%;"></div></div>
         </div>
@@ -5513,7 +5603,6 @@ async function loadTempoView() {
         cardsWrap.appendChild(addBtn);
       }
 
-      // Drag-and-drop from right Issues sidebar
       col.addEventListener("dragover", (e) => {
         if (!viewingOwn) return;
         e.preventDefault();
@@ -5537,8 +5626,160 @@ async function loadTempoView() {
   }
 }
 
-function exportTempoCsv() {
-  const data = state.lastTempoData;
+async function loadTempoAdminView() {
+  if (!state.tempoEnabled || !hasMinRole("admin")) return;
+  const kpiEl = document.getElementById("tempoAdminKpiGrid");
+  const gridEl = document.getElementById("tempoAdminContentGrid");
+  if (!kpiEl || !gridEl) return;
+
+  if (!state.tempoAdminRange.dateFrom || !state.tempoAdminRange.dateTo) {
+    const { df, dt } = computeTempoPresetDates(state.tempoAdminRange.preset || "this_week");
+    state.tempoAdminRange.dateFrom = df;
+    state.tempoAdminRange.dateTo = dt;
+  }
+
+  try {
+    const params = new URLSearchParams({
+      date_from: state.tempoAdminRange.dateFrom,
+      date_to: state.tempoAdminRange.dateTo,
+    });
+    const uFilter = document.getElementById("tempoAdminUserFilter")?.value || "";
+    if (uFilter) params.set("username", uFilter);
+
+    const data = await api(`/api/tempo/worklogs?${params.toString()}`);
+    state.lastTempoAdminData = data;
+
+    const dfEl = document.getElementById("tempoAdminDateFrom");
+    const dtEl = document.getElementById("tempoAdminDateTo");
+    if (dfEl && data.date_from) dfEl.value = data.date_from;
+    if (dtEl && data.date_to) dtEl.value = data.date_to;
+
+    const expPerUser = Number(data.expected_minutes_per_user || 0);
+    const usersCount = (data.by_user || []).length;
+    const activeUsers = (data.by_user || []).filter(u => u.minutes > 0).length;
+    kpiEl.innerHTML = `
+      <div class="kpi-card">
+        <div class="kpi-label">Всего по команде</div>
+        <div class="kpi-val">${formatMinutesCompact(data.total_minutes)}</div>
+        <div class="kpi-sub">${(Number(data.total_minutes || 0) / 60).toFixed(1)} ч за период</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Норма на сотрудника</div>
+        <div class="kpi-val">${formatMinutesCompact(expPerUser)}</div>
+        <div class="kpi-sub">${data.daily_hours || 8}ч/день · ${data.workdays || 5} дн/нед</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Сотрудники</div>
+        <div class="kpi-val">${activeUsers} / ${usersCount}</div>
+        <div class="kpi-sub">Списали время в периоде</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Записей времени</div>
+        <div class="kpi-val">${data.entries_count ?? 0}</div>
+        <div class="kpi-sub">${data.date_from} — ${data.date_to}</div>
+      </div>
+    `;
+
+    const userRows = (data.by_user || []).map(u => `
+      <tr>
+        <td><b>${escapeHtml(u.display_name || u.username)}</b> <span style="color: var(--text-dim);">@${escapeHtml(u.username)}</span></td>
+        <td class="num"><b>${formatMinutesCompact(u.minutes)}</b></td>
+        <td class="num">${formatMinutesCompact(u.expected_minutes)}</td>
+        <td class="num">${u.pct ?? 0}%</td>
+        <td class="num">${u.entries ?? 0}</td>
+        <td class="num">${u.tasks_count ?? 0}</td>
+        <td style="text-align: right;">
+          <button type="button" class="btn btn-secondary btn-sm tempo-admin-open-user" data-username="${escapeHtml(u.username)}">Календарь</button>
+        </td>
+      </tr>
+    `).join("");
+
+    const logRows = (data.items || []).map(w => `
+      <tr>
+        <td>${escapeHtml(w.work_date || "")}</td>
+        <td>${escapeHtml(w.display_name || w.username)}</td>
+        <td><span class="task-key-link" onclick="openTaskDetail(${w.task_id})">${escapeHtml(w.task_key)}</span></td>
+        <td class="task-title-cell" onclick="openTaskDetail(${w.task_id})">${escapeHtml(w.task_title)}</td>
+        <td class="num"><b>${formatMinutesCompact(w.minutes)}</b></td>
+        <td>${escapeHtml(w.comment || "—")}</td>
+        <td style="text-align: right;">
+          <button type="button" class="btn-link-del tempo-admin-del-log" data-wid="${w.id}" title="Удалить запись">&times;</button>
+        </td>
+      </tr>
+    `).join("");
+
+    gridEl.innerHTML = `
+      <div class="chart-card chart-card-full">
+        <div class="chart-card-title">Сводка по всем сотрудникам (${escapeHtml(data.date_from)} — ${escapeHtml(data.date_to)})</div>
+        <div class="analytics-table-wrap">
+          <table class="analytics-detail-table">
+            <thead>
+              <tr>
+                <th>Сотрудник</th>
+                <th class="num">Списано</th>
+                <th class="num">Норма</th>
+                <th class="num">Выполнение</th>
+                <th class="num">Записей</th>
+                <th class="num">Задач</th>
+                <th style="text-align: right;">Действия</th>
+              </tr>
+            </thead>
+            <tbody>${userRows || '<tr><td colspan="7" class="links-empty">Нет данных</td></tr>'}</tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="chart-card chart-card-full">
+        <div class="chart-card-title">Все записи о работе за период</div>
+        <div class="analytics-table-wrap">
+          <table class="analytics-detail-table">
+            <thead>
+              <tr>
+                <th>Дата</th>
+                <th>Сотрудник</th>
+                <th>Ключ</th>
+                <th>Задача</th>
+                <th class="num">Время</th>
+                <th>Комментарий</th>
+                <th style="text-align: right;"></th>
+              </tr>
+            </thead>
+            <tbody>${logRows || '<tr><td colspan="7" class="links-empty">Записей за выбранный период нет</td></tr>'}</tbody>
+          </table>
+        </div>
+      </div>
+    `;
+
+    gridEl.querySelectorAll(".tempo-admin-open-user").forEach(btn => {
+      btn.addEventListener("click", () => {
+        state.tempoSelectedUser = btn.dataset.username;
+        if (state.tempoAdminRange.dateFrom) {
+          const d = new Date(state.tempoAdminRange.dateFrom + "T00:00:00");
+          state.tempoWeekStart = toIsoDateLocal(getMondayOfWeek(d));
+        }
+        setTempoAdminMode(false);
+      });
+    });
+
+    gridEl.querySelectorAll(".tempo-admin-del-log").forEach(btn => {
+      btn.addEventListener("click", async () => {
+        const wid = parseInt(btn.dataset.wid || "0", 10);
+        if (!wid) return;
+        try {
+          await api(`/api/worklogs/${wid}`, { method: "DELETE" });
+          showToast("Запись удалена");
+          loadTempoAdminView();
+        } catch (err) {
+          showToast(err.message);
+        }
+      });
+    });
+  } catch (err) {
+    gridEl.innerHTML = `<div class="links-empty">Ошибка загрузки админ-панели Tempo: ${escapeHtml(err.message)}</div>`;
+  }
+}
+
+function exportTempoCsv(data, prefix = "tempo") {
   if (!data || !data.items) {
     showToast("Нет данных для экспорта");
     return;
@@ -5561,7 +5802,7 @@ function exportTempoCsv() {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = `klukva_tempo_${data.date_from || "week"}_${data.date_to || "week"}.csv`;
+  a.download = `klukva_tempo_${prefix}_${data.date_from || "week"}_${data.date_to || "week"}.csv`;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);

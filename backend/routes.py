@@ -1875,6 +1875,8 @@ def restart_server(current_user: Dict = Depends(require_role("admin"))):
 
 class SystemSettingsUpdateRequest(BaseModel):
     tempo_enabled: Optional[bool] = None
+    tempo_daily_hours: Optional[int] = Field(None, ge=1, le=24)
+    tempo_workdays: Optional[int] = Field(None, ge=1, le=7)
 
 
 class WorklogCreateRequest(BaseModel):

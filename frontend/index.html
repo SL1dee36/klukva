@@ -488,44 +488,98 @@
       </section>
 
       <!-- ================================================================
-           4.5. TEMPO / PERSONAL CALENDAR & TIMESHEET VIEW
+           4.5. TEMPO / PERSONAL CALENDAR & ADMIN PANEL
            ================================================================ -->
       <section class="view-section" id="viewTempo">
-        <div class="tempo-topbar">
-          <div class="tempo-topbar-left">
-            <div class="tempo-user-pill" id="tempoUserPill">
-              <span class="user-avatar" id="tempoUserAvatar"></span>
-              <span class="tempo-user-name" id="tempoUserName">Пользователь</span>
+        <div id="tempoPersonalView" class="tempo-subview active">
+          <div class="tempo-topbar">
+            <div class="tempo-topbar-left">
+              <div class="tempo-user-pill" id="tempoUserPill">
+                <span class="user-avatar" id="tempoUserAvatar"></span>
+                <span class="tempo-user-name" id="tempoUserName">Пользователь</span>
+              </div>
+              <button type="button" class="btn btn-secondary btn-sm" id="btnTempoToday">Сегодня</button>
+              <button type="button" class="btn btn-ghost btn-sm" id="btnTempoBackToMe" style="display: none;">&larr; Мой календарь</button>
             </div>
-            <select id="tempoUserFilter" class="form-control select-sm" style="width: auto; max-width: 180px; display: none;" title="Просмотр табеля сотрудника">
-            </select>
-            <button type="button" class="btn btn-secondary btn-sm" id="btnTempoToday">Сегодня</button>
-          </div>
-          <div class="tempo-week-nav">
-            <button type="button" class="btn btn-ghost btn-sm" id="btnTempoPrevWeek" title="Предыдущая неделя">&lsaquo;</button>
-            <div class="tempo-week-label-wrap">
-              <div class="tempo-week-range" id="tempoWeekRangeLabel">—</div>
-              <div class="tempo-week-total" id="tempoWeekTotalLabel">0м / 40ч</div>
+            <div class="tempo-week-nav">
+              <button type="button" class="btn btn-ghost btn-sm" id="btnTempoPrevWeek" title="Предыдущая неделя">&lsaquo;</button>
+              <div class="tempo-week-label-wrap">
+                <div class="tempo-week-range" id="tempoWeekRangeLabel">—</div>
+                <div class="tempo-week-total" id="tempoWeekTotalLabel">0м / 40ч</div>
+              </div>
+              <button type="button" class="btn btn-ghost btn-sm" id="btnTempoNextWeek" title="Следующая неделя">&rsaquo;</button>
             </div>
-            <button type="button" class="btn btn-ghost btn-sm" id="btnTempoNextWeek" title="Следующая неделя">&rsaquo;</button>
+            <div class="tempo-topbar-right">
+              <button type="button" class="btn btn-primary btn-sm" id="btnTempoOpenLogModal">+ Запись</button>
+              <button type="button" class="btn btn-secondary btn-sm" id="btnExportTempoCsv" title="Скачать табель недели в CSV">CSV</button>
+              <button type="button" class="btn btn-secondary btn-sm" id="btnTempoOpenAdmin" style="display: none;">Администрирование</button>
+            </div>
           </div>
-          <div class="tempo-topbar-right">
-            <button type="button" class="btn btn-primary btn-sm" id="btnTempoOpenLogModal">+ Запись</button>
-            <button type="button" class="btn btn-secondary btn-sm" id="btnExportTempoCsv" title="Скачать табель недели в CSV">CSV</button>
+
+          <div class="tempo-workspace">
+            <div class="tempo-calendar-grid" id="tempoCalendarGrid"></div>
+            <aside class="tempo-issues-sidebar">
+              <div class="tempo-issues-header">
+                <span class="tempo-issues-title">Запросы</span>
+              </div>
+              <div class="tempo-issues-search-wrap">
+                <input type="text" id="tempoIssuesSearch" class="form-control input-sm" placeholder="Поиск по ключу или названию...">
+              </div>
+              <div class="tempo-issues-list" id="tempoIssuesList"></div>
+            </aside>
           </div>
         </div>
 
-        <div class="tempo-workspace">
-          <div class="tempo-calendar-grid" id="tempoCalendarGrid"></div>
-          <aside class="tempo-issues-sidebar">
-            <div class="tempo-issues-header">
-              <span class="tempo-issues-title">Запросы</span>
+        <!-- TEMPO ADMIN PANEL (ADMIN ONLY: ALL USERS & ALL PERIODS + SETTINGS) -->
+        <div id="tempoAdminView" class="tempo-subview" style="display: none;">
+          <div class="toolbar analytics-toolbar">
+            <div class="sprint-view-controls">
+              <button type="button" class="btn btn-ghost btn-sm" id="btnTempoBackFromAdmin">&larr; Мой календарь</button>
+              <span class="panel-title">Администрирование Tempo</span>
+              <div class="analytics-range-presets" id="tempoAdminPresets">
+                <button type="button" class="btn btn-secondary btn-sm tempo-admin-preset active" data-preset="this_week">Эта неделя</button>
+                <button type="button" class="btn btn-secondary btn-sm tempo-admin-preset" data-preset="prev_week">Прошлая неделя</button>
+                <button type="button" class="btn btn-secondary btn-sm tempo-admin-preset" data-preset="14d">14 дн</button>
+                <button type="button" class="btn btn-secondary btn-sm tempo-admin-preset" data-preset="30d">Месяц</button>
+              </div>
             </div>
-            <div class="tempo-issues-search-wrap">
-              <input type="text" id="tempoIssuesSearch" class="form-control input-sm" placeholder="Поиск по ключу или названию...">
+            <div class="header-actions analytics-range-controls">
+              <select id="tempoAdminUserFilter" class="form-control select-sm" style="width: auto; max-width: 180px;">
+                <option value="">Все сотрудники</option>
+              </select>
+              <label class="analytics-date-label">С <input type="date" id="tempoAdminDateFrom" class="form-control input-sm"></label>
+              <label class="analytics-date-label">По <input type="date" id="tempoAdminDateTo" class="form-control input-sm"></label>
+              <button type="button" class="btn btn-primary btn-sm" id="btnApplyTempoAdmin">Показать</button>
+              <button type="button" class="btn btn-secondary btn-sm" id="btnExportTempoAdminCsv">CSV</button>
             </div>
-            <div class="tempo-issues-list" id="tempoIssuesList"></div>
-          </aside>
+          </div>
+
+          <div class="analytics-container p-16">
+            <!-- Admin Tempo Settings Bar -->
+            <div class="chart-card" style="margin-bottom: 16px;">
+              <div class="analytics-card-head">
+                <div class="chart-card-title">Параметры учёта времени (для всей команды)</div>
+              </div>
+              <form id="formTempoAdminSettings" class="tempo-admin-settings-form">
+                <label class="analytics-date-label">
+                  Норма часов в день:
+                  <input type="number" id="inputTempoDailyHours" class="form-control input-sm" min="1" max="24" value="8" style="width: 72px;">
+                </label>
+                <label class="analytics-date-label">
+                  Рабочих дней в неделе:
+                  <select id="selectTempoWorkdays" class="form-control select-sm" style="width: auto;">
+                    <option value="5">5 дней (Пн–Пт)</option>
+                    <option value="6">6 дней (Пн–Сб)</option>
+                    <option value="7">7 дней (Пн–Вс)</option>
+                  </select>
+                </label>
+                <button type="submit" class="btn btn-primary btn-sm">Сохранить параметры</button>
+              </form>
+            </div>
+
+            <div class="analytics-kpi-grid" id="tempoAdminKpiGrid"></div>
+            <div class="analytics-charts-grid" id="tempoAdminContentGrid"></div>
+          </div>
         </div>
       </section>
 

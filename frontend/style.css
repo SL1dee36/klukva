@@ -7291,3 +7291,18 @@ select.select-sm optgroup {
     border-top: 1px solid var(--border-default);
   }
 }
+
+.tempo-subview {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.tempo-admin-settings-form {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
