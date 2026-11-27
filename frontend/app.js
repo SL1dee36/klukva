@@ -1051,11 +1051,12 @@ function populateHierarchySelects() {
   const epics = state.epics || [];
   const siriuses = state.siriuses || [];
 
-  const filterCluster = document.getElementById("filterCluster");
-  if (filterCluster) {
+  ["filterCluster", "boardFilterCluster"].forEach(selId => {
+    const filterCluster = document.getElementById(selId);
+    if (!filterCluster) return;
     const desired = filterCluster.dataset.pendingValue || filterCluster.value || "";
     delete filterCluster.dataset.pendingValue;
-    filterCluster.innerHTML = '<option value="">Все</option>';
+    filterCluster.innerHTML = selId === "boardFilterCluster" ? '<option value="">Все эпики/сириусы</option>' : '<option value="">Все</option>';
     if (siriuses.length) {
       const grpS = document.createElement("optgroup");
       grpS.label = "Сириусы";
@@ -1079,7 +1080,7 @@ function populateHierarchySelects() {
       filterCluster.appendChild(grpE);
     }
     if (desired) filterCluster.value = desired;
-  }
+  });
 
   ["createEpicId", "detailEpicId"].forEach(id => {
     const sel = document.getElementById(id);
@@ -1713,15 +1714,54 @@ function renderScrumBoard() {
     boardTasks = boardTasks.filter(t => t.assignee && t.assignee.toLowerCase() === myName);
   }
 
-  counterEl.textContent = `${boardTasks.length} ${pluralizeTasks(boardTasks.length)}`;
+  // Поиск и фильтры доски (текст, тип, эпик/сириус)
+  const bSearch = (document.getElementById("boardSearchInput")?.value || "").trim().toLowerCase();
+  const bType = document.getElementById("boardFilterType")?.value || "";
+  const bCluster = document.getElementById("boardFilterCluster")?.value || "";
+  const resetBtn = document.getElementById("boardResetFilters");
+  if (resetBtn) {
+    resetBtn.style.display = (bSearch || bType || bCluster) ? "inline-flex" : "none";
+  }
+
+  if (bSearch) {
+    boardTasks = boardTasks.filter(t =>
+      (t.key || "").toLowerCase().includes(bSearch) ||
+      (t.title || "").toLowerCase().includes(bSearch) ||
+      (t.description || "").toLowerCase().includes(bSearch)
+    );
+  }
+  if (bType) {
+    boardTasks = boardTasks.filter(t => (t.task_type || "Задача") === bType);
+  }
+  if (bCluster) {
+    if (bCluster.startsWith("epic:")) {
+      const eid = parseInt(bCluster.slice(5), 10);
+      boardTasks = boardTasks.filter(t => t.epic_id === eid || t.id === eid);
+    } else if (bCluster.startsWith("sirius:")) {
+      const sid = parseInt(bCluster.slice(7), 10);
+      const epicIdsInSirius = new Set((state.epics || []).filter(e => e.sirius_id === sid).map(e => e.id));
+      boardTasks = boardTasks.filter(t => t.sirius_id === sid || t.id === sid || epicIdsInSirius.has(t.epic_id));
+    }
+  }
+
+  const totalBoardSp = boardTasks.reduce((acc, t) => acc + Number(t.story_points || 0), 0);
+  counterEl.textContent = `${boardTasks.length} ${pluralizeTasks(boardTasks.length)} • ${totalBoardSp} SP`;
 
   // 4 колонки с нашими статусами (без отдельного столбца "Частично")
   const STATUS_COLUMNS = [
-    { key: "todo", title: "Бэклог", statuses: ["Бэклог"] },
-    { key: "paused", title: "Не реализовано", statuses: ["Не реализовано"] },
-    { key: "inprog", title: "В работе", statuses: ["В работе", "Реализовано частично"] },
-    { key: "done", title: "Завершено", statuses: ["Завершено"] }
+    { key: "todo", title: "Бэклог", statuses: ["Бэклог"], countElId: "boardColCountTodo" },
+    { key: "paused", title: "Не реализовано", statuses: ["Не реализовано"], countElId: "boardColCountPaused" },
+    { key: "inprog", title: "В работе", statuses: ["В работе", "Реализовано частично"], countElId: "boardColCountInprog" },
+    { key: "done", title: "Завершено", statuses: ["Завершено"], countElId: "boardColCountDone" }
   ];
+
+  STATUS_COLUMNS.forEach(col => {
+    const el = document.getElementById(col.countElId);
+    if (!el) return;
+    const colTasks = boardTasks.filter(t => col.statuses.includes(t.status));
+    const colSp = colTasks.reduce((acc, t) => acc + Number(t.story_points || 0), 0);
+    el.textContent = `(${colTasks.length} · ${colSp} SP)`;
+  });
 
   // Группировка задач по исполнителям (Свимлейны)
   const assigneeMap = new Map();
@@ -3011,6 +3051,19 @@ function setupEventListeners() {
     document.getElementById("boardFilterAll").classList.add("active");
     document.getElementById("boardFilterOnlyMy").classList.remove("active");
     debouncedSavePosition();
+    renderScrumBoard();
+  });
+
+  document.getElementById("boardSearchInput")?.addEventListener("input", debounce(renderScrumBoard, 200));
+  document.getElementById("boardFilterType")?.addEventListener("change", renderScrumBoard);
+  document.getElementById("boardFilterCluster")?.addEventListener("change", renderScrumBoard);
+  document.getElementById("boardResetFilters")?.addEventListener("click", () => {
+    const bs = document.getElementById("boardSearchInput");
+    const bt = document.getElementById("boardFilterType");
+    const bc = document.getElementById("boardFilterCluster");
+    if (bs) bs.value = "";
+    if (bt) bt.value = "";
+    if (bc) bc.value = "";
     renderScrumBoard();
   });
 

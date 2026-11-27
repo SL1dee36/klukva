@@ -350,6 +350,22 @@
             <span class="board-sprint-name" id="boardSprintNameDisplay">V-Спринт (Активный)</span>
           </div>
           <div class="board-quick-actions">
+            <input type="text" id="boardSearchInput" class="form-control input-sm board-filter-input" placeholder="Поиск по ключу, названию...">
+            <select id="boardFilterType" class="form-control select-sm board-filter-select" aria-label="Тип задачи на доске">
+              <option value="">Все типы</option>
+              <option value="Задача">Задача</option>
+              <option value="Нововведение">Нововведение</option>
+              <option value="Ошибка">Ошибка</option>
+              <option value="Тестирование">Тестирование</option>
+              <option value="Ревью">Ревью</option>
+              <option value="Исследование">Исследование</option>
+              <option value="Эпик">Эпик</option>
+              <option value="Сириус">Сириус</option>
+            </select>
+            <select id="boardFilterCluster" class="form-control select-sm board-filter-select" aria-label="Эпик или Сириус на доске">
+              <option value="">Все эпики/сириусы</option>
+            </select>
+            <button type="button" class="btn btn-secondary btn-sm" id="boardResetFilters" style="display: none;">Сброс</button>
             <button class="board-quick-link" id="boardFilterOnlyMy">Только мои задачи</button>
             <button class="board-quick-link" id="boardFilterAll">Все задачи</button>
             <span class="board-counter" id="boardTaskCount">0 задач</span>
@@ -369,19 +385,19 @@
             <!-- 2-Tier Grouped Headers like Jira Screenshot -->
             <div class="scrum-grid-header">
               <div class="scrum-header-cell col-todo">
-                <div class="header-main-title">НУЖНО СДЕЛАТЬ</div>
+                <div class="header-main-title">НУЖНО СДЕЛАТЬ <span class="col-header-count" id="boardColCountTodo"></span></div>
                 <div class="header-sub-title">БЭКЛОГ / НОВАЯ</div>
               </div>
               <div class="scrum-header-cell col-paused">
-                <div class="header-main-title">РАБОТЫ ПРИОСТАНОВЛЕНЫ</div>
+                <div class="header-main-title">РАБОТЫ ПРИОСТАНОВЛЕНЫ <span class="col-header-count" id="boardColCountPaused"></span></div>
                 <div class="header-sub-title">НЕ РЕАЛИЗОВАНО / ПАУЗА</div>
               </div>
               <div class="scrum-header-cell col-inprog">
-                <div class="header-main-title">ВЕДЕТСЯ РАБОТА</div>
+                <div class="header-main-title">ВЕДЕТСЯ РАБОТА <span class="col-header-count" id="boardColCountInprog"></span></div>
                 <div class="header-sub-title">В РАБОТЕ / АНАЛИЗ</div>
               </div>
               <div class="scrum-header-cell col-done">
-                <div class="header-main-title">РАБОТЫ ЗАВЕРШЕНЫ</div>
+                <div class="header-main-title">РАБОТЫ ЗАВЕРШЕНЫ <span class="col-header-count" id="boardColCountDone"></span></div>
                 <div class="header-sub-title">ЗАВЕРШЕНО / ГОТОВО</div>
               </div>
             </div>

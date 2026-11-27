@@ -6613,3 +6613,32 @@ body.board-drawer-resizing .fullpage-view.drawer-mode .drawer-resizer::after {
   flex-shrink: 0;
   vertical-align: middle;
 }
+
+/* ==========================================================================
+   SCRUM BOARD FILTERS & COLUMN COUNTERS (v2.6.0)
+   ========================================================================== */
+.board-quick-actions {
+  flex-wrap: wrap;
+}
+
+.board-filter-input {
+  width: 170px;
+  min-width: 120px;
+  height: 28px;
+  font-size: 12px;
+}
+
+.board-filter-select {
+  width: auto;
+  max-width: 165px;
+  height: 28px;
+  font-size: 12px;
+}
+
+.col-header-count {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-muted);
+  margin-left: 4px;
+}
