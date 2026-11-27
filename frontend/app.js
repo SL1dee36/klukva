@@ -85,6 +85,7 @@ const state = {
   lastAnalyticsData: null,
   currentTab: initialTab, // 'backlog' | 'sprints' | 'board' | 'analytics'
   boardFilterOnlyMy: false,
+  boardHideEmptyLanes: localStorage.getItem("klukva_board_hide_empty") === "1",
   currentTaskDetail: null,
   taskDrawerMode: false,
   pendingTotpChallenge: null,
@@ -1792,6 +1793,7 @@ function renderScrumBoard() {
 
   // Отрисовка свимлейна для каждого сотрудника
   assigneeMap.forEach((entry) => {
+    if (state.boardHideEmptyLanes && entry.tasks.length === 0) return;
     renderSwimlane(container, entry.name, entry.username, entry.tasks, STATUS_COLUMNS);
   });
 
@@ -1808,13 +1810,15 @@ function renderSwimlane(parent, title, username, tasks, columns) {
   lane.className = "scrum-swimlane";
   lane.id = `swimlane-${username || "unassigned"}`;
 
+  const laneSp = tasks.reduce((acc, t) => acc + Number(t.story_points || 0), 0);
+
   const header = document.createElement("div");
   header.className = "scrum-swimlane-header";
   header.innerHTML = `
     <div class="swimlane-header-content">
       <span class="swimlane-arrow">▼</span>
       <span class="swimlane-user-title">${escapeHtml(title)}</span>
-      <span class="swimlane-count">${tasks.length} ${pluralizeTasks(tasks.length)}</span>
+      <span class="swimlane-count">${tasks.length} ${pluralizeTasks(tasks.length)} • ${laneSp} SP</span>
     </div>
   `;
 
@@ -3053,6 +3057,21 @@ function setupEventListeners() {
     debouncedSavePosition();
     renderScrumBoard();
   });
+
+  const btnToggleEmpty = document.getElementById("boardToggleEmptyLanes");
+  if (btnToggleEmpty) {
+    const syncEmptyBtn = () => {
+      btnToggleEmpty.classList.toggle("active", state.boardHideEmptyLanes);
+      btnToggleEmpty.textContent = state.boardHideEmptyLanes ? "Показать пустые" : "Скрыть пустые";
+    };
+    syncEmptyBtn();
+    btnToggleEmpty.addEventListener("click", () => {
+      state.boardHideEmptyLanes = !state.boardHideEmptyLanes;
+      try { localStorage.setItem("klukva_board_hide_empty", state.boardHideEmptyLanes ? "1" : "0"); } catch (e) { }
+      syncEmptyBtn();
+      renderScrumBoard();
+    });
+  }
 
   document.getElementById("boardSearchInput")?.addEventListener("input", debounce(renderScrumBoard, 200));
   document.getElementById("boardFilterType")?.addEventListener("change", renderScrumBoard);
