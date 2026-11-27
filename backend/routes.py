@@ -1886,6 +1886,8 @@ class SystemSettingsUpdateRequest(BaseModel):
     tempo_workdays: Optional[int] = Field(None, ge=1, le=7)
     archive_enabled: Optional[bool] = None
     checklists_enabled: Optional[bool] = None
+    wip_limits_enabled: Optional[bool] = None
+    wip_limit_inprog: Optional[int] = Field(None, ge=1, le=50)
 
 
 class ChecklistItemCreateRequest(BaseModel):
@@ -1924,6 +1926,9 @@ def update_system_settings(
     if "checklists_enabled" in updates:
         state_lbl = "включены" if res["checklists_enabled"] else "выключены"
         db.add_activity(current_user["username"], "system_settings", details=f"Чек-листы в задачах {state_lbl}")
+    if "wip_limits_enabled" in updates:
+        state_lbl = "включены" if res["wip_limits_enabled"] else "выключены"
+        db.add_activity(current_user["username"], "system_settings", details=f"WIP-лимиты на доске {state_lbl}")
     return res
 
 

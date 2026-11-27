@@ -7353,3 +7353,30 @@ select.select-sm optgroup {
 .checklist-add-form input {
   flex: 1;
 }
+
+/* ==========================================================================
+   WIP LIMITS ON SCRUM BOARD (v2.14.0)
+   ========================================================================== */
+.wip-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  background: var(--bg-app);
+  border: 1px solid var(--border-default);
+  color: var(--text-muted);
+}
+
+.wip-badge.exceeded {
+  background: rgba(220, 38, 38, 0.14);
+  border-color: rgba(220, 38, 38, 0.45);
+  color: #dc2626;
+}
+
+.scrum-cell.wip-exceeded {
+  background: rgba(220, 38, 38, 0.06);
+  box-shadow: inset 0 0 0 1.5px rgba(220, 38, 38, 0.45);
+}

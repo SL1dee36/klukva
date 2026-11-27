@@ -90,6 +90,8 @@ const state = {
   tempoEnabled: false,
   archiveEnabled: false,
   checklistsEnabled: false,
+  wipLimitsEnabled: false,
+  wipLimitInprog: 3,
   tempoDailyHours: 8,
   tempoWorkdays: 5,
   tempoWeekStart: null,
@@ -2050,6 +2052,12 @@ function renderSwimlane(parent, title, username, tasks, columns) {
   lane.id = `swimlane-${username || "unassigned"}`;
 
   const laneSp = tasks.reduce((acc, t) => acc + Number(t.story_points || 0), 0);
+  const inprogCount = tasks.filter(t => t.status === "В работе" || t.status === "Реализовано частично").length;
+  const wipLimit = Number(state.wipLimitInprog || 3);
+  const wipExceeded = Boolean(state.wipLimitsEnabled && inprogCount > wipLimit);
+  const wipBadgeHtml = state.wipLimitsEnabled
+    ? `<span class="wip-badge ${wipExceeded ? "exceeded" : ""}">WIP ${inprogCount}/${wipLimit}</span>`
+    : "";
 
   const header = document.createElement("div");
   header.className = "scrum-swimlane-header";
@@ -2058,6 +2066,7 @@ function renderSwimlane(parent, title, username, tasks, columns) {
       <span class="swimlane-arrow">▼</span>
       <span class="swimlane-user-title">${escapeHtml(title)}</span>
       <span class="swimlane-count">${tasks.length} ${pluralizeTasks(tasks.length)} • ${laneSp} SP</span>
+      ${wipBadgeHtml}
     </div>
   `;
 
@@ -2076,6 +2085,9 @@ function renderSwimlane(parent, title, username, tasks, columns) {
     cell.dataset.assignee = username || "";
 
     const colTasks = tasks.filter(t => col.statuses.includes(t.status));
+    if (col.key === "inprog" && state.wipLimitsEnabled && colTasks.length > Number(state.wipLimitInprog || 3)) {
+      cell.classList.add("wip-exceeded");
+    }
     colTasks.forEach(t => {
       const card = createScrumCard(t);
       cell.appendChild(card);
@@ -3284,6 +3296,7 @@ function setupEventListeners() {
   setupTempoListeners();
   setupArchiveListeners();
   setupChecklistListeners();
+  setupWipLimitListeners();
 
   setupNotificationListeners();
   setupProfileListeners();
@@ -5212,6 +5225,14 @@ function applyTempoVisibility() {
   if (lblCl) lblCl.textContent = clOn ? "Включено" : "Выключено";
   if (secCl && !clOn) secCl.style.display = "none";
 
+  const wipOn = Boolean(state.wipLimitsEnabled);
+  const chkWip = document.getElementById("chkWipLimitsEnabled");
+  const lblWip = document.getElementById("lblWipLimitsEnabledState");
+  const inpWip = document.getElementById("inputWipLimitInprog");
+  if (chkWip) chkWip.checked = wipOn;
+  if (lblWip) lblWip.textContent = wipOn ? "Включено" : "Выключено";
+  if (inpWip) inpWip.value = String(state.wipLimitInprog || 3);
+
   const hrsInput = document.getElementById("inputTempoDailyHours");
   const wdSelect = document.getElementById("selectTempoWorkdays");
   if (hrsInput) hrsInput.value = String(state.tempoDailyHours || 8);
@@ -5228,6 +5249,8 @@ async function loadSystemSettings() {
     state.tempoEnabled = Boolean(s && s.tempo_enabled);
     state.archiveEnabled = Boolean(s && s.archive_enabled);
     state.checklistsEnabled = Boolean(s && s.checklists_enabled);
+    state.wipLimitsEnabled = Boolean(s && s.wip_limits_enabled);
+    state.wipLimitInprog = Number(s?.wip_limit_inprog || 3);
     state.tempoDailyHours = Number(s?.tempo_daily_hours || 8);
     state.tempoWorkdays = Number(s?.tempo_workdays || 5);
   } catch (err) {
@@ -6053,4 +6076,50 @@ function renderTaskChecklist(task) {
     });
     listEl.appendChild(row);
   });
+}
+
+// ============================================================================
+// WIP LIMITS ON SCRUM BOARD (v2.14.0, ADMIN TOGGLED)
+// ============================================================================
+function setupWipLimitListeners() {
+  const chk = document.getElementById("chkWipLimitsEnabled");
+  const inp = document.getElementById("inputWipLimitInprog");
+  if (chk) {
+    chk.addEventListener("change", async () => {
+      const nextVal = chk.checked;
+      chk.disabled = true;
+      try {
+        const res = await api("/api/system/settings", {
+          method: "PATCH",
+          body: JSON.stringify({ wip_limits_enabled: nextVal })
+        });
+        state.wipLimitsEnabled = Boolean(res.wip_limits_enabled);
+        applyTempoVisibility();
+        if (state.currentTab === "board") renderScrumBoard();
+        showToast(state.wipLimitsEnabled ? "WIP-лимиты на доске включены" : "WIP-лимиты на доске выключены");
+      } catch (err) {
+        chk.checked = state.wipLimitsEnabled;
+        showToast(`Ошибка: ${err.message}`);
+      } finally {
+        chk.disabled = false;
+      }
+    });
+  }
+  if (inp) {
+    inp.addEventListener("change", async () => {
+      const val = Math.max(1, Math.min(50, parseInt(inp.value || "3", 10) || 3));
+      inp.value = String(val);
+      try {
+        const res = await api("/api/system/settings", {
+          method: "PATCH",
+          body: JSON.stringify({ wip_limit_inprog: val })
+        });
+        state.wipLimitInprog = Number(res.wip_limit_inprog || 3);
+        if (state.currentTab === "board") renderScrumBoard();
+        showToast(`WIP-лимит обновлён: ${state.wipLimitInprog}`);
+      } catch (err) {
+        showToast(`Ошибка: ${err.message}`);
+      }
+    });
+  }
 }

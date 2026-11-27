@@ -1425,6 +1425,21 @@
             </div>
             <div class="settings-row" style="margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border-subtle);">
               <div class="settings-row-info">
+                <span class="settings-row-label">WIP-лимиты на Скрам-доске</span>
+                <span class="settings-row-desc">Подсвечивает перегруз в колонке «В работе», если у сотрудника больше заданного числа задач (по умолчанию выключено)</span>
+              </div>
+              <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+                <label class="analytics-date-label">Лимит:
+                  <input type="number" id="inputWipLimitInprog" class="form-control input-sm" min="1" max="50" value="3" style="width: 64px;">
+                </label>
+                <label class="sys-update-token-check">
+                  <input type="checkbox" id="chkWipLimitsEnabled">
+                  <span id="lblWipLimitsEnabledState">Выключено</span>
+                </label>
+              </div>
+            </div>
+            <div class="settings-row" style="margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border-subtle);">
+              <div class="settings-row-info">
                 <span class="settings-row-label">Резервные копии базы данных</span>
                 <span class="settings-row-desc">Автоматически создаются при запуске сервера и перед каждым обновлением (хранятся последние 10 копий)</span>
                 <div class="sys-backups-list" id="sysBackupsList"></div>

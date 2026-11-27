@@ -59,6 +59,8 @@ DEFAULT_DB: Dict[str, Any] = {
         "tempo_workdays": 5,
         "archive_enabled": False,
         "checklists_enabled": False,
+        "wip_limits_enabled": False,
+        "wip_limit_inprog": 3,
     },
 }
 
@@ -2216,6 +2218,8 @@ class JSONDatabase:
                 "tempo_workdays": int(settings.get("tempo_workdays", 5) or 5),
                 "archive_enabled": bool(settings.get("archive_enabled", False)),
                 "checklists_enabled": bool(settings.get("checklists_enabled", False)),
+                "wip_limits_enabled": bool(settings.get("wip_limits_enabled", False)),
+                "wip_limit_inprog": int(settings.get("wip_limit_inprog", 3) or 3),
             }
 
     def update_system_settings(self, updates: Dict[str, Any]) -> Dict[str, Any]:
@@ -2227,6 +2231,8 @@ class JSONDatabase:
                 "tempo_workdays": 5,
                 "archive_enabled": False,
                 "checklists_enabled": False,
+                "wip_limits_enabled": False,
+                "wip_limit_inprog": 3,
             })
             if "tempo_enabled" in updates:
                 settings["tempo_enabled"] = bool(updates["tempo_enabled"])
@@ -2238,6 +2244,10 @@ class JSONDatabase:
                 settings["archive_enabled"] = bool(updates["archive_enabled"])
             if "checklists_enabled" in updates:
                 settings["checklists_enabled"] = bool(updates["checklists_enabled"])
+            if "wip_limits_enabled" in updates:
+                settings["wip_limits_enabled"] = bool(updates["wip_limits_enabled"])
+            if "wip_limit_inprog" in updates and updates["wip_limit_inprog"] is not None:
+                settings["wip_limit_inprog"] = max(1, min(50, int(updates["wip_limit_inprog"])))
             self._atomic_write(data)
             return {
                 "tempo_enabled": bool(settings.get("tempo_enabled", False)),
@@ -2245,6 +2255,8 @@ class JSONDatabase:
                 "tempo_workdays": int(settings.get("tempo_workdays", 5) or 5),
                 "archive_enabled": bool(settings.get("archive_enabled", False)),
                 "checklists_enabled": bool(settings.get("checklists_enabled", False)),
+                "wip_limits_enabled": bool(settings.get("wip_limits_enabled", False)),
+                "wip_limit_inprog": int(settings.get("wip_limit_inprog", 3) or 3),
             }
 
     def add_checklist_item(self, task_id: int, text: str) -> Optional[Dict[str, Any]]:
