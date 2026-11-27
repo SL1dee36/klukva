@@ -88,6 +88,7 @@ const state = {
   boardHideEmptyLanes: localStorage.getItem("klukva_board_hide_empty") === "1",
   selectedBacklogIds: new Set(),
   tempoEnabled: false,
+  archiveEnabled: false,
   tempoDailyHours: 8,
   tempoWorkdays: 5,
   tempoWeekStart: null,
@@ -2358,6 +2359,8 @@ async function openTaskDetail(taskId, options = {}) {
 
     const isAssignedToMe = task.assignee && state.currentUser && task.assignee.toLowerCase() === state.currentUser.username.toLowerCase();
     document.getElementById("btnDetailTakeTask").style.display = isAssignedToMe ? "none" : "inline-flex";
+    const btnArch = document.getElementById("btnArchiveTask");
+    if (btnArch) btnArch.style.display = (state.archiveEnabled && hasMinRole("member")) ? "inline-flex" : "none";
 
     updatePartialSplitBoxVisibility();
     renderHierarchyChildren(task);
@@ -3277,6 +3280,7 @@ function setupEventListeners() {
   document.getElementById("btnRefreshAnalytics")?.addEventListener("click", loadAnalytics);
   document.getElementById("btnExportAnalyticsCsv")?.addEventListener("click", exportAnalyticsCsv);
   setupTempoListeners();
+  setupArchiveListeners();
 
   setupNotificationListeners();
   setupProfileListeners();
@@ -5187,6 +5191,16 @@ function applyTempoVisibility() {
   if (lbl) lbl.textContent = enabled ? "Включено" : "Выключено";
   if (btnAdmin) btnAdmin.style.display = (enabled && hasMinRole("admin")) ? "inline-flex" : "none";
 
+  const archOn = Boolean(state.archiveEnabled);
+  const chkArch = document.getElementById("chkArchiveEnabled");
+  const lblArch = document.getElementById("lblArchiveEnabledState");
+  const btnOpenArch = document.getElementById("btnOpenArchiveModal");
+  const btnArchTask = document.getElementById("btnArchiveTask");
+  if (chkArch) chkArch.checked = archOn;
+  if (lblArch) lblArch.textContent = archOn ? "Включено" : "Выключено";
+  if (btnOpenArch) btnOpenArch.style.display = archOn ? "inline-flex" : "none";
+  if (btnArchTask && !archOn) btnArchTask.style.display = "none";
+
   const hrsInput = document.getElementById("inputTempoDailyHours");
   const wdSelect = document.getElementById("selectTempoWorkdays");
   if (hrsInput) hrsInput.value = String(state.tempoDailyHours || 8);
@@ -5201,10 +5215,12 @@ async function loadSystemSettings() {
   try {
     const s = await api("/api/system/settings");
     state.tempoEnabled = Boolean(s && s.tempo_enabled);
+    state.archiveEnabled = Boolean(s && s.archive_enabled);
     state.tempoDailyHours = Number(s?.tempo_daily_hours || 8);
     state.tempoWorkdays = Number(s?.tempo_workdays || 5);
   } catch (err) {
     state.tempoEnabled = false;
+    state.archiveEnabled = false;
   }
   applyTempoVisibility();
 }
@@ -5808,4 +5824,105 @@ function exportTempoCsv(data, prefix = "tempo") {
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
   showToast("Табель Tempo выгружен в CSV");
+}
+
+// ============================================================================
+// ARCHIVE & TRASH (v2.12.0, ADMIN TOGGLED)
+// ============================================================================
+function setupArchiveListeners() {
+  const chkArch = document.getElementById("chkArchiveEnabled");
+  if (chkArch) {
+    chkArch.addEventListener("change", async () => {
+      const nextVal = chkArch.checked;
+      chkArch.disabled = true;
+      try {
+        const res = await api("/api/system/settings", {
+          method: "PATCH",
+          body: JSON.stringify({ archive_enabled: nextVal })
+        });
+        state.archiveEnabled = Boolean(res.archive_enabled);
+        applyTempoVisibility();
+        showToast(state.archiveEnabled ? "Архивация задач включена" : "Архивация задач выключена");
+      } catch (err) {
+        chkArch.checked = state.archiveEnabled;
+        showToast(`Ошибка: ${err.message}`);
+      } finally {
+        chkArch.disabled = false;
+      }
+    });
+  }
+
+  document.getElementById("btnArchiveTask")?.addEventListener("click", async () => {
+    if (!state.currentTaskDetail || !state.archiveEnabled) return;
+    if (!confirm(`Переместить задачу ${state.currentTaskDetail.key} в архив?`)) return;
+    try {
+      await api(`/api/tasks/${state.currentTaskDetail.id}/archive`, { method: "POST" });
+      showToast(`Задача ${state.currentTaskDetail.key} перемещена в архив`);
+      closeTaskDetail();
+      await loadTasks();
+    } catch (err) {
+      showToast(`Ошибка: ${err.message}`);
+    }
+  });
+
+  document.getElementById("btnOpenArchiveModal")?.addEventListener("click", openArchiveModal);
+  document.getElementById("btnCloseArchiveModal")?.addEventListener("click", () => {
+    document.getElementById("modalArchive").style.display = "none";
+  });
+}
+
+async function openArchiveModal() {
+  const modal = document.getElementById("modalArchive");
+  const body = document.getElementById("archiveListBody");
+  if (!modal || !body) return;
+  modal.style.display = "flex";
+  body.innerHTML = '<div class="links-empty" style="padding: 16px;">Загрузка архива...</div>';
+  try {
+    const items = await api("/api/tasks/archived");
+    if (!items.length) {
+      body.innerHTML = '<div class="links-empty" style="padding: 20px;">Архив пуст</div>';
+      return;
+    }
+    const isAdmin = hasMinRole("admin");
+    body.innerHTML = "";
+    items.forEach(t => {
+      const row = document.createElement("div");
+      row.className = "tempo-worklog-row";
+      row.style.marginBottom = "6px";
+      row.innerHTML = `
+        <div class="tempo-worklog-main">
+          <span class="task-key-link">${escapeHtml(t.key)}</span>
+          <b>${escapeHtml(t.title)}</b>
+          <span class="tempo-worklog-date">${formatDate(t.archived_at || t.updated_at)}</span>
+        </div>
+        <div style="display:flex; gap:6px; flex-shrink:0;">
+          <button type="button" class="btn btn-secondary btn-sm arch-restore">Восстановить</button>
+          ${isAdmin ? '<button type="button" class="btn btn-secondary btn-sm arch-del" style="color:#dc2626;">Удалить</button>' : ""}
+        </div>
+      `;
+      row.querySelector(".arch-restore")?.addEventListener("click", async () => {
+        try {
+          await api(`/api/tasks/${t.id}/restore`, { method: "POST" });
+          showToast(`Задача ${t.key} восстановлена`);
+          await openArchiveModal();
+          await loadTasks();
+        } catch (err) {
+          showToast(err.message);
+        }
+      });
+      row.querySelector(".arch-del")?.addEventListener("click", async () => {
+        if (!confirm(`Удалить задачу ${t.key} навсегда? Это действие необратимо.`)) return;
+        try {
+          await api(`/api/tasks/${t.id}`, { method: "DELETE" });
+          showToast(`Задача ${t.key} удалена`);
+          await openArchiveModal();
+        } catch (err) {
+          showToast(err.message);
+        }
+      });
+      body.appendChild(row);
+    });
+  } catch (err) {
+    body.innerHTML = `<div class="links-empty">${escapeHtml(err.message)}</div>`;
+  }
 }

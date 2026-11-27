@@ -167,6 +167,7 @@
           </div>
 
           <div class="view-stats" id="backlogStats">
+            <button type="button" class="btn btn-secondary btn-sm" id="btnOpenArchiveModal" style="display: none; margin-right: 6px;">Архив</button>
             <span id="backlogCount">0 задач</span>
             <span class="stat-separator">•</span>
             <span id="backlogSpTotal">0 SP</span>
@@ -673,6 +674,7 @@
       </div>
       <div class="fullpage-header-right">
         <button class="btn btn-secondary btn-sm" id="btnDetailTakeTask">Взять в работу</button>
+        <button class="btn btn-secondary btn-sm" id="btnArchiveTask" style="display: none;">В архив</button>
         <button class="btn btn-primary btn-sm" id="btnSaveTask">Сохранить</button>
         <span id="saveStatusIndicator" class="status-msg"></span>
         <button type="button" class="btn btn-ghost btn-sm drawer-only-btn" id="btnExpandTaskDrawer" title="Открыть на весь экран" style="display: none;">&#8599;</button>
@@ -1387,6 +1389,16 @@
             </div>
             <div class="settings-row" style="margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border-subtle);">
               <div class="settings-row-info">
+                <span class="settings-row-label">Архивация и корзина задач</span>
+                <span class="settings-row-desc">Позволяет отправлять задачи в архив, восстанавливать их и удалять безвозвратно (по умолчанию выключено)</span>
+              </div>
+              <label class="sys-update-token-check">
+                <input type="checkbox" id="chkArchiveEnabled">
+                <span id="lblArchiveEnabledState">Выключено</span>
+              </label>
+            </div>
+            <div class="settings-row" style="margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border-subtle);">
+              <div class="settings-row-info">
                 <span class="settings-row-label">Резервные копии базы данных</span>
                 <span class="settings-row-desc">Автоматически создаются при запуске сервера и перед каждым обновлением (хранятся последние 10 копий)</span>
                 <div class="sys-backups-list" id="sysBackupsList"></div>
@@ -1607,6 +1619,19 @@
           <button type="submit" class="btn btn-primary">Записать время</button>
         </div>
       </form>
+    </div>
+  </div>
+
+  <!-- =========================================================================
+       MODAL: ARCHIVE / TRASH
+       ========================================================================= -->
+  <div class="modal-overlay" id="modalArchive" style="display: none;">
+    <div class="modal-card" style="max-width: 720px; width: 92vw;">
+      <div class="modal-header">
+        <h3 class="modal-title">Архив и корзина задач</h3>
+        <button type="button" class="btn-close-modal" id="btnCloseArchiveModal">&times;</button>
+      </div>
+      <div id="archiveListBody" style="max-height: 60vh; overflow-y: auto;"></div>
     </div>
   </div>
 

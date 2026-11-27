@@ -912,6 +912,13 @@ def close_sprint(
     return result
 
 
+@router.get("/tasks/archived")
+def list_archived_tasks(current_user: Dict = Depends(get_current_user)):
+    if not db.get_system_settings().get("archive_enabled"):
+        raise HTTPException(status_code=403, detail="Архивация отключена администратором")
+    return db.get_archived_tasks()
+
+
 @router.get("/tasks/{task_id}")
 def get_task(task_id: int, current_user: Dict = Depends(get_current_user)):
     task = db.get_task_by_id(task_id)
@@ -1877,6 +1884,7 @@ class SystemSettingsUpdateRequest(BaseModel):
     tempo_enabled: Optional[bool] = None
     tempo_daily_hours: Optional[int] = Field(None, ge=1, le=24)
     tempo_workdays: Optional[int] = Field(None, ge=1, le=7)
+    archive_enabled: Optional[bool] = None
 
 
 class WorklogCreateRequest(BaseModel):
@@ -1900,7 +1908,43 @@ def update_system_settings(
     if "tempo_enabled" in updates:
         state_lbl = "включён" if res["tempo_enabled"] else "выключен"
         db.add_activity(current_user["username"], "system_settings", details=f"Модуль Tempo {state_lbl}")
+    if "archive_enabled" in updates:
+        state_lbl = "включена" if res["archive_enabled"] else "выключена"
+        db.add_activity(current_user["username"], "system_settings", details=f"Архивация задач {state_lbl}")
     return res
+
+
+@router.post("/tasks/{task_id}/archive")
+def archive_task(task_id: int, current_user: Dict = Depends(require_role("member"))):
+    if not db.get_system_settings().get("archive_enabled"):
+        raise HTTPException(status_code=403, detail="Архивация отключена администратором")
+    t = db.archive_task(task_id, current_user["username"])
+    if not t:
+        raise HTTPException(status_code=404, detail="Задача не найдена")
+    db.add_activity(current_user["username"], "task_archived", task_id, t["key"], t["title"], "Задача перемещена в архив")
+    return t
+
+
+@router.post("/tasks/{task_id}/restore")
+def restore_task(task_id: int, current_user: Dict = Depends(require_role("member"))):
+    if not db.get_system_settings().get("archive_enabled"):
+        raise HTTPException(status_code=403, detail="Архивация отключена администратором")
+    t = db.restore_task(task_id)
+    if not t:
+        raise HTTPException(status_code=404, detail="Задача не найдена")
+    db.add_activity(current_user["username"], "task_restored", task_id, t["key"], t["title"], "Задача восстановлена из архива")
+    return t
+
+
+@router.delete("/tasks/{task_id}")
+def delete_task_permanently(task_id: int, current_user: Dict = Depends(require_role("admin"))):
+    if not db.get_system_settings().get("archive_enabled"):
+        raise HTTPException(status_code=403, detail="Архивация отключена администратором")
+    deleted = db.hard_delete_task(task_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Задача не найдена")
+    db.add_activity(current_user["username"], "task_deleted", task_id, deleted["key"], deleted["title"], "Задача удалена безвозвратно")
+    return {"ok": True}
 
 
 @router.get("/tasks/{task_id}/worklogs")

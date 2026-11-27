@@ -57,6 +57,7 @@ DEFAULT_DB: Dict[str, Any] = {
         "tempo_enabled": False,
         "tempo_daily_hours": 8,
         "tempo_workdays": 5,
+        "archive_enabled": False,
     },
 }
 
@@ -677,6 +678,8 @@ class JSONDatabase:
 
             result = []
             for t in tasks:
+                if t.get("archived"):
+                    continue
                 if status and t.get("status") != status:
                     continue
                 if exclude_backlog and t.get("status") == "Бэклог":
@@ -1839,7 +1842,7 @@ class JSONDatabase:
                         return True
                 return False
 
-            tasks = [t for t in all_tasks if _in_range(t)]
+            tasks = [t for t in all_tasks if not t.get("archived") and _in_range(t)]
 
             by_status = {s: 0 for s in VALID_STATUSES}
             by_status_sp = {s: 0.0 for s in VALID_STATUSES}
@@ -2207,24 +2210,85 @@ class JSONDatabase:
                 "tempo_enabled": bool(settings.get("tempo_enabled", False)),
                 "tempo_daily_hours": int(settings.get("tempo_daily_hours", 8) or 8),
                 "tempo_workdays": int(settings.get("tempo_workdays", 5) or 5),
+                "archive_enabled": bool(settings.get("archive_enabled", False)),
             }
 
     def update_system_settings(self, updates: Dict[str, Any]) -> Dict[str, Any]:
         with _lock:
             data = self._read_data()
-            settings = data.setdefault("settings", {"tempo_enabled": False, "tempo_daily_hours": 8, "tempo_workdays": 5})
+            settings = data.setdefault("settings", {
+                "tempo_enabled": False,
+                "tempo_daily_hours": 8,
+                "tempo_workdays": 5,
+                "archive_enabled": False,
+            })
             if "tempo_enabled" in updates:
                 settings["tempo_enabled"] = bool(updates["tempo_enabled"])
             if "tempo_daily_hours" in updates and updates["tempo_daily_hours"] is not None:
                 settings["tempo_daily_hours"] = max(1, min(24, int(updates["tempo_daily_hours"])))
             if "tempo_workdays" in updates and updates["tempo_workdays"] is not None:
                 settings["tempo_workdays"] = max(1, min(7, int(updates["tempo_workdays"])))
+            if "archive_enabled" in updates:
+                settings["archive_enabled"] = bool(updates["archive_enabled"])
             self._atomic_write(data)
             return {
                 "tempo_enabled": bool(settings.get("tempo_enabled", False)),
                 "tempo_daily_hours": int(settings.get("tempo_daily_hours", 8) or 8),
                 "tempo_workdays": int(settings.get("tempo_workdays", 5) or 5),
+                "archive_enabled": bool(settings.get("archive_enabled", False)),
             }
+
+    def get_archived_tasks(self) -> List[Dict[str, Any]]:
+        with _lock:
+            data = self._read_data()
+            res = [t for t in data.get("tasks", []) if t.get("archived")]
+            res.sort(key=lambda x: x.get("archived_at") or x.get("updated_at") or "", reverse=True)
+            self._enrich_tasks(data, res)
+            return res
+
+    def archive_task(self, task_id: int, username: str) -> Optional[Dict[str, Any]]:
+        with _lock:
+            data = self._read_data()
+            for t in data.get("tasks", []):
+                if t["id"] == task_id:
+                    now = datetime.utcnow().isoformat() + "Z"
+                    t["archived"] = True
+                    t["archived_at"] = now
+                    t["archived_by"] = username
+                    t["in_sprint"] = False
+                    t["updated_at"] = now
+                    self._atomic_write(data)
+                    self._enrich_tasks(data, [t])
+                    return t
+            return None
+
+    def restore_task(self, task_id: int) -> Optional[Dict[str, Any]]:
+        with _lock:
+            data = self._read_data()
+            for t in data.get("tasks", []):
+                if t["id"] == task_id:
+                    t["archived"] = False
+                    t["archived_at"] = None
+                    t["archived_by"] = None
+                    t["updated_at"] = datetime.utcnow().isoformat() + "Z"
+                    self._atomic_write(data)
+                    self._enrich_tasks(data, [t])
+                    return t
+            return None
+
+    def hard_delete_task(self, task_id: int) -> Optional[Dict[str, Any]]:
+        with _lock:
+            data = self._read_data()
+            tasks = data.get("tasks", [])
+            target = next((t for t in tasks if t["id"] == task_id), None)
+            if not target:
+                return None
+            data["tasks"] = [t for t in tasks if t["id"] != task_id]
+            data["comments"] = [c for c in data.get("comments", []) if c.get("task_id") != task_id]
+            data["links"] = [l for l in data.get("links", []) if l.get("source_id") != task_id and l.get("target_id") != task_id]
+            data["worklogs"] = [w for w in data.get("worklogs", []) if w.get("task_id") != task_id]
+            self._atomic_write(data)
+            return target
 
     def get_worklogs(
         self,
