@@ -50,7 +50,12 @@ DEFAULT_DB: Dict[str, Any] = {
         "attachment_id": 0,
         "notification_id": 0,
         "activity_id": 0,
-    }
+        "worklog_id": 0,
+    },
+    "worklogs": [],
+    "settings": {
+        "tempo_enabled": False,
+    },
 }
 
 VALID_STATUSES = [
@@ -1287,6 +1292,15 @@ class JSONDatabase:
         all_tasks = data.get("tasks", [])
         by_id = {t["id"]: t for t in all_tasks}
         links = data.get("links", [])
+        worklogs = data.get("worklogs", [])
+
+        worklog_mins_by_task: Dict[int, int] = {}
+        worklog_cnt_by_task: Dict[int, int] = {}
+        for w in worklogs:
+            wtid = w.get("task_id")
+            if wtid:
+                worklog_mins_by_task[wtid] = worklog_mins_by_task.get(wtid, 0) + int(w.get("minutes") or 0)
+                worklog_cnt_by_task[wtid] = worklog_cnt_by_task.get(wtid, 0) + 1
 
         # Precompute children per Epic and Epics per Sirius
         tasks_by_epic: Dict[int, List[Dict[str, Any]]] = {}
@@ -1357,6 +1371,8 @@ class JSONDatabase:
                 t["epics_total"] = 0
                 t["children_total"] = 0
                 t["children_done"] = 0
+            t["time_spent_minutes"] = worklog_mins_by_task.get(tid, 0)
+            t["worklogs_count"] = worklog_cnt_by_task.get(tid, 0)
 
     def get_task_hierarchy_children(self, task_id: int) -> Dict[str, List[Dict[str, Any]]]:
         with _lock:
@@ -2179,6 +2195,191 @@ class JSONDatabase:
                     })
             items.sort(key=lambda x: x["created_at"], reverse=True)
             return items
+
+    # ------------------ SYSTEM SETTINGS & TEMPO (WORKLOGS) ------------------
+    def get_system_settings(self) -> Dict[str, Any]:
+        with _lock:
+            data = self._read_data()
+            settings = data.get("settings") or {}
+            return {
+                "tempo_enabled": bool(settings.get("tempo_enabled", False)),
+            }
+
+    def update_system_settings(self, updates: Dict[str, Any]) -> Dict[str, Any]:
+        with _lock:
+            data = self._read_data()
+            settings = data.setdefault("settings", {"tempo_enabled": False})
+            if "tempo_enabled" in updates:
+                settings["tempo_enabled"] = bool(updates["tempo_enabled"])
+            self._atomic_write(data)
+            return {
+                "tempo_enabled": bool(settings.get("tempo_enabled", False)),
+            }
+
+    def get_worklogs(
+        self,
+        task_id: Optional[int] = None,
+        username: Optional[str] = None,
+        date_from: Optional[str] = None,
+        date_to: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        with _lock:
+            data = self._read_data()
+            worklogs = data.get("worklogs", [])
+            tasks_by_id = {t["id"]: t for t in data.get("tasks", [])}
+            users_map = {u["username"].lower(): u.get("display_name", u["username"]) for u in data.get("users", [])}
+
+            res = []
+            for w in worklogs:
+                if task_id is not None and w.get("task_id") != task_id:
+                    continue
+                if username and (w.get("username") or "").lower() != username.lower():
+                    continue
+                wdate = (w.get("work_date") or w.get("created_at") or "")[:10]
+                if date_from and wdate and wdate < date_from[:10]:
+                    continue
+                if date_to and wdate and wdate > date_to[:10]:
+                    continue
+                t = tasks_by_id.get(w.get("task_id"))
+                uname = w.get("username") or ""
+                res.append({
+                    **w,
+                    "task_key": t["key"] if t else f"KLUK-{w.get('task_id')}",
+                    "task_title": t["title"] if t else "",
+                    "display_name": users_map.get(uname.lower(), uname),
+                })
+            res.sort(key=lambda x: (x.get("work_date") or "", x.get("id", 0)), reverse=True)
+            return res
+
+    def add_worklog(
+        self,
+        task_id: int,
+        username: str,
+        minutes: int,
+        comment: str = "",
+        work_date: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        with _lock:
+            data = self._read_data()
+            task = next((t for t in data.get("tasks", []) if t["id"] == task_id), None)
+            if not task:
+                raise ValueError("Задача не найдена")
+            if minutes <= 0 or minutes > 24 * 60 * 7:
+                raise ValueError("Укажите корректное время (от 1 минуты)")
+
+            counters = data.setdefault("counters", {})
+            counters["worklog_id"] = counters.get("worklog_id", 0) + 1
+            wid = counters["worklog_id"]
+            now = datetime.utcnow().isoformat() + "Z"
+            eff_date = (work_date or now)[:10]
+            try:
+                datetime.strptime(eff_date, "%Y-%m-%d")
+            except ValueError:
+                eff_date = now[:10]
+
+            entry = {
+                "id": wid,
+                "task_id": task_id,
+                "username": username,
+                "minutes": int(minutes),
+                "work_date": eff_date,
+                "comment": (comment or "").strip()[:500],
+                "created_at": now,
+            }
+            data.setdefault("worklogs", []).append(entry)
+            self._atomic_write(data)
+            users_map = {u["username"].lower(): u.get("display_name", u["username"]) for u in data.get("users", [])}
+            return {
+                **entry,
+                "task_key": task["key"],
+                "task_title": task["title"],
+                "display_name": users_map.get(username.lower(), username),
+            }
+
+    def delete_worklog(self, worklog_id: int, actor_username: str, is_manager: bool = False) -> Optional[Dict[str, Any]]:
+        with _lock:
+            data = self._read_data()
+            worklogs = data.get("worklogs", [])
+            target = next((w for w in worklogs if w["id"] == worklog_id), None)
+            if not target:
+                return None
+            if not is_manager and (target.get("username") or "").lower() != actor_username.lower():
+                raise PermissionError("Удалить запись времени может только её автор или менеджер")
+            data["worklogs"] = [w for w in worklogs if w["id"] != worklog_id]
+            self._atomic_write(data)
+            return target
+
+    def get_tempo_summary(
+        self,
+        date_from: Optional[str] = None,
+        date_to: Optional[str] = None,
+        username: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        today = datetime.utcnow().date()
+        end_d = today
+        start_d = today - timedelta(days=13)
+        if date_to:
+            try:
+                end_d = datetime.strptime(date_to[:10], "%Y-%m-%d").date()
+            except ValueError:
+                pass
+        if date_from:
+            try:
+                start_d = datetime.strptime(date_from[:10], "%Y-%m-%d").date()
+            except ValueError:
+                pass
+        if start_d > end_d:
+            start_d, end_d = end_d, start_d
+
+        df = start_d.isoformat()
+        dt = end_d.isoformat()
+        items = self.get_worklogs(username=username, date_from=df, date_to=dt)
+
+        by_user: Dict[str, Dict[str, Any]] = {}
+        by_task: Dict[int, Dict[str, Any]] = {}
+        by_day: Dict[str, int] = {}
+        total_minutes = 0
+
+        for w in items:
+            m = int(w.get("minutes") or 0)
+            total_minutes += m
+            u_key = (w.get("username") or "").lower()
+            if u_key not in by_user:
+                by_user[u_key] = {
+                    "username": w.get("username"),
+                    "display_name": w.get("display_name"),
+                    "minutes": 0,
+                    "entries": 0,
+                }
+            by_user[u_key]["minutes"] += m
+            by_user[u_key]["entries"] += 1
+
+            tid = w.get("task_id")
+            if tid not in by_task:
+                by_task[tid] = {
+                    "task_id": tid,
+                    "task_key": w.get("task_key"),
+                    "task_title": w.get("task_title"),
+                    "minutes": 0,
+                    "entries": 0,
+                }
+            by_task[tid]["minutes"] += m
+            by_task[tid]["entries"] += 1
+
+            wd = (w.get("work_date") or "")[:10]
+            if wd:
+                by_day[wd] = by_day.get(wd, 0) + m
+
+        return {
+            "date_from": df,
+            "date_to": dt,
+            "total_minutes": total_minutes,
+            "entries_count": len(items),
+            "by_user": sorted(by_user.values(), key=lambda x: (-x["minutes"], x["display_name"] or "")),
+            "by_task": sorted(by_task.values(), key=lambda x: (-x["minutes"], x["task_id"])),
+            "by_day": [{"date": d, "minutes": by_day[d]} for d in sorted(by_day.keys())],
+            "items": items,
+        }
 
 
 ATTACHMENTS_DIR = os.path.join(os.path.dirname(DB_FILE_PATH), "klukva_attachments")

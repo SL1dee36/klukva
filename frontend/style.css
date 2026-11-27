@@ -6896,3 +6896,69 @@ select.select-sm optgroup {
   flex: 1 1 220px;
   max-width: 360px;
 }
+
+/* ==========================================================================
+   TEMPO TIME TRACKING (v2.9.0)
+   ========================================================================== */
+.tempo-quick-btns {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+
+.tempo-log-form {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 10px 0 12px;
+}
+
+.tempo-worklogs-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.tempo-worklog-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 7px 10px;
+  background: var(--bg-app);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+}
+
+.tempo-worklog-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.tempo-time-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--accent-subtle);
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.tempo-worklog-date {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.tempo-worklog-comment {
+  color: var(--text-secondary);
+}

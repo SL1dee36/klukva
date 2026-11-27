@@ -87,6 +87,9 @@ const state = {
   boardFilterOnlyMy: false,
   boardHideEmptyLanes: localStorage.getItem("klukva_board_hide_empty") === "1",
   selectedBacklogIds: new Set(),
+  tempoEnabled: false,
+  tempoRange: { days: 14, dateFrom: "", dateTo: "" },
+  lastTempoData: null,
   currentTaskDetail: null,
   taskDrawerMode: false,
   pendingTotpChallenge: null,
@@ -977,6 +980,7 @@ async function onAuthSuccess() {
   }
 
   await loadUsers();
+  await loadSystemSettings();
   restoreFilters();
   await loadActiveSprint();
   await loadNotifications();
@@ -1046,7 +1050,8 @@ function populateAssigneeSelects() {
     document.getElementById("detailAssignee"),
     document.getElementById("splitAssignee"),
     document.getElementById("filterAssignee"),
-    document.getElementById("bulkAssigneeSelect")
+    document.getElementById("bulkAssigneeSelect"),
+    document.getElementById("tempoUserFilter")
   ];
 
   selects.forEach(select => {
@@ -2354,6 +2359,7 @@ async function openTaskDetail(taskId, options = {}) {
     resetLinkForm();
     loadLinks(taskId);
     loadAttachments(taskId);
+    loadTaskWorklogs(taskId);
 
     const detailEl = document.getElementById("fullpageTaskDetail");
     document.querySelectorAll(".scrum-card.drawer-selected").forEach(c => c.classList.remove("drawer-selected"));
@@ -3260,9 +3266,11 @@ function setupEventListeners() {
   document.getElementById("tabSprints").addEventListener("click", () => switchTab("sprints"));
   document.getElementById("tabBoard").addEventListener("click", () => switchTab("board"));
   document.getElementById("tabAnalytics")?.addEventListener("click", () => switchTab("analytics"));
+  document.getElementById("tabTempo")?.addEventListener("click", () => switchTab("tempo"));
   document.getElementById("navTabSystem")?.addEventListener("click", () => switchTab("system"));
   document.getElementById("btnRefreshAnalytics")?.addEventListener("click", loadAnalytics);
   document.getElementById("btnExportAnalyticsCsv")?.addEventListener("click", exportAnalyticsCsv);
+  setupTempoListeners();
 
   setupNotificationListeners();
   setupProfileListeners();
@@ -3669,10 +3677,13 @@ function switchTab(tab, updateUrl = true) {
   document.getElementById("viewSprints").classList.toggle("active", tab === "sprints");
   document.getElementById("viewBoard").classList.toggle("active", tab === "board");
   document.getElementById("viewAnalytics")?.classList.toggle("active", tab === "analytics");
+  document.getElementById("viewTempo")?.classList.toggle("active", tab === "tempo");
   document.getElementById("viewSystem")?.classList.toggle("active", tab === "system");
 
   if (tab === "analytics") {
     loadAnalytics();
+  } else if (tab === "tempo") {
+    loadTempoView();
   } else if (tab === "system") {
     loadSystemPanel();
   } else {
@@ -5125,4 +5136,351 @@ async function loadSystemUsers() {
   } catch (err) {
     wrap.innerHTML = `<div class="links-empty">Ошибка: ${escapeHtml(err.message)}</div>`;
   }
+}
+
+
+// ============================================================================
+// TEMPO (УЧЁТ РАБОЧЕГО ВРЕМЕНИ, ВКЛЮЧАЕТСЯ АДМИНИСТРАЦИЕЙ)
+// ============================================================================
+function formatMinutesCompact(mins) {
+  const m = Math.max(0, Math.round(Number(mins || 0)));
+  if (m === 0) return "0м";
+  const h = Math.floor(m / 60);
+  const rem = m % 60;
+  if (h && rem) return `${h}ч ${rem}м`;
+  if (h) return `${h}ч`;
+  return `${rem}м`;
+}
+
+function applyTempoVisibility() {
+  const enabled = Boolean(state.tempoEnabled);
+  const tabTempo = document.getElementById("tabTempo");
+  const taskSec = document.getElementById("tempoTaskSection");
+  const chk = document.getElementById("chkTempoEnabled");
+  const lbl = document.getElementById("lblTempoEnabledState");
+
+  if (tabTempo) tabTempo.style.display = enabled ? "inline-flex" : "none";
+  if (taskSec) taskSec.style.display = enabled ? "block" : "none";
+  if (chk) chk.checked = enabled;
+  if (lbl) lbl.textContent = enabled ? "Включено" : "Выключено";
+
+  if (!enabled && state.currentTab === "tempo") {
+    switchTab("backlog");
+  }
+}
+
+async function loadSystemSettings() {
+  try {
+    const s = await api("/api/system/settings");
+    state.tempoEnabled = Boolean(s && s.tempo_enabled);
+  } catch (err) {
+    state.tempoEnabled = false;
+  }
+  applyTempoVisibility();
+}
+
+function setupTempoListeners() {
+  const chk = document.getElementById("chkTempoEnabled");
+  if (chk) {
+    chk.addEventListener("change", async () => {
+      const nextVal = chk.checked;
+      chk.disabled = true;
+      try {
+        const res = await api("/api/system/settings", {
+          method: "PATCH",
+          body: JSON.stringify({ tempo_enabled: nextVal })
+        });
+        state.tempoEnabled = Boolean(res.tempo_enabled);
+        applyTempoVisibility();
+        showToast(state.tempoEnabled ? "Модуль Tempo включён" : "Модуль Tempo выключен");
+      } catch (err) {
+        chk.checked = state.tempoEnabled;
+        showToast(`Ошибка: ${err.message}`);
+      } finally {
+        chk.disabled = false;
+      }
+    });
+  }
+
+  document.querySelectorAll(".tempo-quick-add").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      if (!state.currentTaskDetail || !state.tempoEnabled) return;
+      const mins = parseInt(btn.dataset.mins, 10) || 0;
+      if (mins <= 0) return;
+      const dateVal = document.getElementById("inputTempoDate")?.value || new Date().toISOString().slice(0, 10);
+      try {
+        await api(`/api/tasks/${state.currentTaskDetail.id}/worklogs`, {
+          method: "POST",
+          body: JSON.stringify({ minutes: mins, work_date: dateVal, comment: "" })
+        });
+        showToast(`Списано ${formatMinutesCompact(mins)}`);
+        await loadTaskWorklogs(state.currentTaskDetail.id);
+      } catch (err) {
+        showToast(`Ошибка: ${err.message}`);
+      }
+    });
+  });
+
+  const formLog = document.getElementById("formLogWork");
+  if (formLog) {
+    formLog.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      if (!state.currentTaskDetail || !state.tempoEnabled) return;
+      const h = parseInt(document.getElementById("inputTempoHours")?.value || "0", 10) || 0;
+      const m = parseInt(document.getElementById("inputTempoMins")?.value || "0", 10) || 0;
+      const totalMins = h * 60 + m;
+      if (totalMins <= 0) {
+        showToast("Укажите часы или минуты");
+        return;
+      }
+      const work_date = document.getElementById("inputTempoDate")?.value || new Date().toISOString().slice(0, 10);
+      const comment = document.getElementById("inputTempoComment")?.value.trim() || "";
+      try {
+        await api(`/api/tasks/${state.currentTaskDetail.id}/worklogs`, {
+          method: "POST",
+          body: JSON.stringify({ minutes: totalMins, work_date, comment })
+        });
+        document.getElementById("inputTempoHours").value = "";
+        document.getElementById("inputTempoMins").value = "";
+        document.getElementById("inputTempoComment").value = "";
+        showToast(`Списано ${formatMinutesCompact(totalMins)}`);
+        await loadTaskWorklogs(state.currentTaskDetail.id);
+      } catch (err) {
+        showToast(`Ошибка: ${err.message}`);
+      }
+    });
+  }
+
+  document.querySelectorAll(".tempo-preset-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const days = parseInt(btn.dataset.days, 10) || 14;
+      const end = new Date();
+      const start = new Date();
+      start.setDate(end.getDate() - (days - 1));
+      state.tempoRange = {
+        days,
+        dateFrom: start.toISOString().slice(0, 10),
+        dateTo: end.toISOString().slice(0, 10),
+      };
+      document.querySelectorAll(".tempo-preset-btn").forEach(b => b.classList.toggle("active", b === btn));
+      loadTempoView();
+    });
+  });
+
+  document.getElementById("btnApplyTempoRange")?.addEventListener("click", () => {
+    const df = document.getElementById("tempoDateFrom")?.value || "";
+    const dt = document.getElementById("tempoDateTo")?.value || "";
+    state.tempoRange = { days: null, dateFrom: df, dateTo: dt };
+    document.querySelectorAll(".tempo-preset-btn").forEach(b => b.classList.remove("active"));
+    loadTempoView();
+  });
+
+  document.getElementById("tempoUserFilter")?.addEventListener("change", loadTempoView);
+  document.getElementById("btnExportTempoCsv")?.addEventListener("click", exportTempoCsv);
+}
+
+async function loadTaskWorklogs(taskId) {
+  const sec = document.getElementById("tempoTaskSection");
+  const listEl = document.getElementById("taskWorklogsList");
+  const totalEl = document.getElementById("taskTempoTotal");
+  const dateInput = document.getElementById("inputTempoDate");
+  if (dateInput && !dateInput.value) {
+    dateInput.value = new Date().toISOString().slice(0, 10);
+  }
+  if (!state.tempoEnabled) {
+    if (sec) sec.style.display = "none";
+    return;
+  }
+  if (sec) sec.style.display = "block";
+  if (!listEl) return;
+
+  try {
+    const items = await api(`/api/tasks/${taskId}/worklogs`);
+    const totalMins = items.reduce((acc, w) => acc + Number(w.minutes || 0), 0);
+    if (totalEl) totalEl.textContent = `Всего: ${formatMinutesCompact(totalMins)}`;
+
+    if (!items.length) {
+      listEl.innerHTML = '<div class="links-empty">Время по задаче ещё не списывалось</div>';
+      return;
+    }
+
+    const canManage = hasMinRole("manager");
+    const myName = (state.currentUser?.username || "").toLowerCase();
+    listEl.innerHTML = "";
+    items.forEach(w => {
+      const row = document.createElement("div");
+      row.className = "tempo-worklog-row";
+      const canDel = canManage || (w.username || "").toLowerCase() === myName;
+      row.innerHTML = `
+        <div class="tempo-worklog-main">
+          <span class="tempo-time-pill">${formatMinutesCompact(w.minutes)}</span>
+          <b>${escapeHtml(w.display_name || w.username)}</b>
+          <span class="tempo-worklog-date">${escapeHtml(w.work_date || "")}</span>
+          ${w.comment ? `<span class="tempo-worklog-comment">— ${escapeHtml(w.comment)}</span>` : ""}
+        </div>
+        ${canDel ? '<button type="button" class="btn-link-del" title="Удалить запись">&times;</button>' : ""}
+      `;
+      const delBtn = row.querySelector(".btn-link-del");
+      if (delBtn) {
+        delBtn.addEventListener("click", async () => {
+          try {
+            await api(`/api/worklogs/${w.id}`, { method: "DELETE" });
+            showToast("Запись времени удалена");
+            await loadTaskWorklogs(taskId);
+          } catch (err) {
+            showToast(err.message);
+          }
+        });
+      }
+      listEl.appendChild(row);
+    });
+  } catch (err) {
+    listEl.innerHTML = `<div class="links-empty">${escapeHtml(err.message)}</div>`;
+  }
+}
+
+async function loadTempoView() {
+  if (!state.tempoEnabled) return;
+  const kpiEl = document.getElementById("tempoKpiGrid");
+  const chartsEl = document.getElementById("tempoChartsGrid");
+  if (!kpiEl || !chartsEl) return;
+
+  try {
+    const params = new URLSearchParams();
+    if (state.tempoRange.dateFrom) params.set("date_from", state.tempoRange.dateFrom);
+    if (state.tempoRange.dateTo) params.set("date_to", state.tempoRange.dateTo);
+    const uFilter = document.getElementById("tempoUserFilter")?.value || "";
+    if (uFilter) params.set("username", uFilter);
+
+    const qs = params.toString();
+    const data = await api(`/api/tempo/worklogs${qs ? `?${qs}` : ""}`);
+    state.lastTempoData = data;
+
+    const dfEl = document.getElementById("tempoDateFrom");
+    const dtEl = document.getElementById("tempoDateTo");
+    if (dfEl && data.date_from) dfEl.value = data.date_from;
+    if (dtEl && data.date_to) dtEl.value = data.date_to;
+
+    const totalH = (Number(data.total_minutes || 0) / 60).toFixed(1);
+    kpiEl.innerHTML = `
+      <div class="kpi-card">
+        <div class="kpi-label">Всего времени</div>
+        <div class="kpi-val">${formatMinutesCompact(data.total_minutes)}</div>
+        <div class="kpi-sub">${totalH} ч за период</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Списаний</div>
+        <div class="kpi-val">${data.entries_count ?? 0}</div>
+        <div class="kpi-sub">${data.date_from} — ${data.date_to}</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Сотрудников</div>
+        <div class="kpi-val">${(data.by_user || []).length}</div>
+        <div class="kpi-sub">Участвовало в учёте</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Задач</div>
+        <div class="kpi-val">${(data.by_task || []).length}</div>
+        <div class="kpi-sub">Со списанным временем</div>
+      </div>
+    `;
+
+    const maxUserMin = Math.max(1, ...(data.by_user || []).map(u => u.minutes));
+    const userBars = (data.by_user || []).length
+      ? (data.by_user || []).map(u => {
+          const pct = Math.round((u.minutes / maxUserMin) * 100);
+          return `
+            <div class="chart-bar-row detailed">
+              <div class="chart-bar-label">${escapeHtml(u.display_name || u.username)}</div>
+              <div class="chart-bar-track"><div class="chart-bar-fill" style="width:${pct}%;background:var(--accent);"></div></div>
+              <div class="chart-bar-val">${formatMinutesCompact(u.minutes)} (${u.entries})</div>
+            </div>
+          `;
+        }).join("")
+      : '<div class="links-empty">Нет списаний за выбранный период</div>';
+
+    const maxTaskMin = Math.max(1, ...(data.by_task || []).map(t => t.minutes));
+    const taskBars = (data.by_task || []).length
+      ? (data.by_task || []).slice(0, 15).map(t => {
+          const pct = Math.round((t.minutes / maxTaskMin) * 100);
+          return `
+            <div class="chart-bar-row detailed">
+              <div class="chart-bar-label" style="cursor:pointer;" onclick="openTaskDetail(${t.task_id})" title="${escapeHtml(t.task_title)}">${escapeHtml(t.task_key)} — ${escapeHtml(t.task_title)}</div>
+              <div class="chart-bar-track"><div class="chart-bar-fill" style="width:${pct}%;background:#0284c7;"></div></div>
+              <div class="chart-bar-val">${formatMinutesCompact(t.minutes)}</div>
+            </div>
+          `;
+        }).join("")
+      : '<div class="links-empty">Нет задач со списанным временем</div>';
+
+    const logRows = (data.items || []).map(w => `
+      <tr>
+        <td>${escapeHtml(w.work_date || "")}</td>
+        <td><span class="task-key-link" onclick="openTaskDetail(${w.task_id})">${escapeHtml(w.task_key)}</span></td>
+        <td class="task-title-cell" onclick="openTaskDetail(${w.task_id})">${escapeHtml(w.task_title)}</td>
+        <td>${escapeHtml(w.display_name || w.username)}</td>
+        <td class="num"><b>${formatMinutesCompact(w.minutes)}</b></td>
+        <td>${escapeHtml(w.comment || "—")}</td>
+      </tr>
+    `).join("");
+
+    chartsEl.innerHTML = `
+      <div class="chart-card"><div class="chart-card-title">Время по сотрудникам</div>${userBars}</div>
+      <div class="chart-card"><div class="chart-card-title">Время по задачам</div>${taskBars}</div>
+      <div class="chart-card chart-card-full">
+        <div class="chart-card-title">Журнал списаний времени (Timesheet)</div>
+        ${(data.items || []).length ? `
+          <div class="analytics-table-wrap">
+            <table class="analytics-detail-table">
+              <thead>
+                <tr>
+                  <th>Дата</th>
+                  <th>Ключ</th>
+                  <th>Задача</th>
+                  <th>Сотрудник</th>
+                  <th class="num">Время</th>
+                  <th>Комментарий</th>
+                </tr>
+              </thead>
+              <tbody>${logRows}</tbody>
+            </table>
+          </div>
+        ` : '<div class="links-empty">Записей за выбранный период нет</div>'}
+      </div>
+    `;
+  } catch (err) {
+    chartsEl.innerHTML = `<div class="links-empty">Ошибка загрузки Tempo: ${escapeHtml(err.message)}</div>`;
+  }
+}
+
+function exportTempoCsv() {
+  const data = state.lastTempoData;
+  if (!data || !data.items) {
+    showToast("Сначала откройте вкладку Tempo для загрузки данных");
+    return;
+  }
+  const esc = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+  const lines = [];
+  lines.push(["Дата", "Ключ", "Задача", "Сотрудник", "Минуты", "Время", "Комментарий"].map(esc).join(";"));
+  data.items.forEach(w => {
+    lines.push([
+      w.work_date || "",
+      w.task_key || "",
+      w.task_title || "",
+      w.display_name || w.username || "",
+      w.minutes || 0,
+      formatMinutesCompact(w.minutes),
+      w.comment || ""
+    ].map(esc).join(";"));
+  });
+  const blob = new Blob(["\uFEFF" + lines.join("\r\n")], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `klukva_tempo_${data.date_from || "all"}_${data.date_to || "all"}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  showToast("Табель Tempo выгружен в CSV");
 }

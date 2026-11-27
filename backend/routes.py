@@ -1873,6 +1873,99 @@ def restart_server(current_user: Dict = Depends(require_role("admin"))):
     return {"ok": True, "restarting": True}
 
 
+class SystemSettingsUpdateRequest(BaseModel):
+    tempo_enabled: Optional[bool] = None
+
+
+class WorklogCreateRequest(BaseModel):
+    minutes: int = Field(..., ge=1, le=10080)
+    work_date: Optional[str] = None
+    comment: Optional[str] = ""
+
+
+@router.get("/system/settings")
+def get_system_settings(current_user: Dict = Depends(get_current_user)):
+    return db.get_system_settings()
+
+
+@router.patch("/system/settings")
+def update_system_settings(
+    req: SystemSettingsUpdateRequest,
+    current_user: Dict = Depends(require_role("admin")),
+):
+    updates = req.model_dump(exclude_unset=True)
+    res = db.update_system_settings(updates)
+    if "tempo_enabled" in updates:
+        state_lbl = "включён" if res["tempo_enabled"] else "выключен"
+        db.add_activity(current_user["username"], "system_settings", details=f"Модуль Tempo {state_lbl}")
+    return res
+
+
+@router.get("/tasks/{task_id}/worklogs")
+def list_task_worklogs(task_id: int, current_user: Dict = Depends(get_current_user)):
+    if not db.get_system_settings().get("tempo_enabled"):
+        raise HTTPException(status_code=403, detail="Модуль Tempo отключён администратором")
+    return db.get_worklogs(task_id=task_id)
+
+
+@router.post("/tasks/{task_id}/worklogs", status_code=201)
+def create_task_worklog(
+    task_id: int,
+    req: WorklogCreateRequest,
+    current_user: Dict = Depends(require_role("member")),
+):
+    if not db.get_system_settings().get("tempo_enabled"):
+        raise HTTPException(status_code=403, detail="Модуль Tempo отключён администратором")
+    try:
+        entry = db.add_worklog(
+            task_id=task_id,
+            username=current_user["username"],
+            minutes=req.minutes,
+            comment=req.comment or "",
+            work_date=req.work_date,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    db.add_activity(
+        current_user["username"],
+        "worklog_added",
+        task_id,
+        entry["task_key"],
+        entry["task_title"],
+        f"Списано время: {req.minutes} мин.",
+    )
+    return entry
+
+
+@router.delete("/worklogs/{worklog_id}")
+def delete_task_worklog(worklog_id: int, current_user: Dict = Depends(require_role("member"))):
+    if not db.get_system_settings().get("tempo_enabled"):
+        raise HTTPException(status_code=403, detail="Модуль Tempo отключён администратором")
+    try:
+        deleted = db.delete_worklog(
+            worklog_id,
+            actor_username=current_user["username"],
+            is_manager=has_min_role(current_user, "manager"),
+        )
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Запись времени не найдена")
+    return {"ok": True}
+
+
+@router.get("/tempo/worklogs")
+def get_tempo_timesheet(
+    date_from: Optional[str] = Query(None),
+    date_to: Optional[str] = Query(None),
+    username: Optional[str] = Query(None),
+    current_user: Dict = Depends(get_current_user),
+):
+    if not db.get_system_settings().get("tempo_enabled"):
+        raise HTTPException(status_code=403, detail="Модуль Tempo отключён администратором")
+    return db.get_tempo_summary(date_from=date_from, date_to=date_to, username=username)
+
+
 @router.get("/system/backups")
 def list_system_backups(current_user: Dict = Depends(require_role("admin"))):
     return db.list_backups()

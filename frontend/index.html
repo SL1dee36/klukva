@@ -49,6 +49,7 @@
           <button class="tab-btn" id="tabSprints" data-tab="sprints">Спринты</button>
           <button class="tab-btn" id="tabBoard" data-tab="board">Scam-доска</button>
           <button class="tab-btn" id="tabAnalytics" data-tab="analytics">Аналитика</button>
+          <button class="tab-btn" id="tabTempo" data-tab="tempo" style="display: none;">Tempo</button>
           <button class="tab-btn" id="navTabSystem" data-tab="system" style="display: none;">Система</button>
         </nav>
       </div>
@@ -487,6 +488,35 @@
       </section>
 
       <!-- ================================================================
+           4.5. TEMPO / TIME TRACKING VIEW (OPTIONAL, ADMIN TOGGLED)
+           ================================================================ -->
+      <section class="view-section" id="viewTempo">
+        <div class="toolbar analytics-toolbar">
+          <div class="sprint-view-controls">
+            <span class="panel-title">Tempo — учёт рабочего времени</span>
+            <div class="analytics-range-presets" id="tempoRangePresets">
+              <button type="button" class="btn btn-secondary btn-sm tempo-preset-btn" data-days="7">7 дн</button>
+              <button type="button" class="btn btn-secondary btn-sm tempo-preset-btn active" data-days="14">14 дн</button>
+              <button type="button" class="btn btn-secondary btn-sm tempo-preset-btn" data-days="30">30 дн</button>
+            </div>
+          </div>
+          <div class="header-actions analytics-range-controls">
+            <select id="tempoUserFilter" class="form-control select-sm" style="width: auto; max-width: 180px;">
+              <option value="">Все сотрудники</option>
+            </select>
+            <label class="analytics-date-label">С <input type="date" id="tempoDateFrom" class="form-control input-sm"></label>
+            <label class="analytics-date-label">По <input type="date" id="tempoDateTo" class="form-control input-sm"></label>
+            <button type="button" class="btn btn-primary btn-sm" id="btnApplyTempoRange">Показать</button>
+            <button type="button" class="btn btn-secondary btn-sm" id="btnExportTempoCsv" title="Скачать табель Tempo в CSV">CSV</button>
+          </div>
+        </div>
+        <div class="analytics-container p-16" id="tempoContainer">
+          <div class="analytics-kpi-grid" id="tempoKpiGrid"></div>
+          <div class="analytics-charts-grid" id="tempoChartsGrid"></div>
+        </div>
+      </section>
+
+      <!-- ================================================================
            5. SYSTEM ADMIN PANEL (ONLY FOR is_system USER)
            ================================================================ -->
       <section class="view-section" id="viewSystem">
@@ -690,6 +720,30 @@
           <div class="attachments-hint">Перетащите файлы сюда или нажмите «+ Файл». Максимум 20 МБ.</div>
           <div class="attachments-list" id="attachmentsList"></div>
           <div class="attachment-preview" id="attachmentPreview" style="display: none;"></div>
+        </div>
+
+        <!-- Tempo Worklog Section (visible only when Tempo is enabled) -->
+        <div class="jira-section tempo-section" id="tempoTaskSection" style="display: none;">
+          <div class="links-header">
+            <div>
+              <label class="jira-section-label" style="margin: 0;">Учёт времени (Tempo)</label>
+              <span class="hierarchy-summary" id="taskTempoTotal">0м</span>
+            </div>
+            <div class="tempo-quick-btns">
+              <button type="button" class="btn btn-secondary btn-sm tempo-quick-add" data-mins="15">+15м</button>
+              <button type="button" class="btn btn-secondary btn-sm tempo-quick-add" data-mins="30">+30м</button>
+              <button type="button" class="btn btn-secondary btn-sm tempo-quick-add" data-mins="60">+1ч</button>
+              <button type="button" class="btn btn-secondary btn-sm tempo-quick-add" data-mins="120">+2ч</button>
+            </div>
+          </div>
+          <form id="formLogWork" class="tempo-log-form">
+            <input type="number" id="inputTempoHours" class="form-control input-sm" placeholder="Часы" min="0" max="100" step="1" style="width: 74px;">
+            <input type="number" id="inputTempoMins" class="form-control input-sm" placeholder="Мин" min="0" max="59" step="5" style="width: 74px;">
+            <input type="date" id="inputTempoDate" class="form-control input-sm" style="width: 136px;">
+            <input type="text" id="inputTempoComment" class="form-control input-sm" placeholder="Комментарий к списанию (необязательно)" style="flex: 1; min-width: 140px;">
+            <button type="submit" class="btn btn-primary btn-sm">Списать</button>
+          </form>
+          <div class="tempo-worklogs-list" id="taskWorklogsList"></div>
         </div>
 
         <!-- Comments Section -->
@@ -1271,6 +1325,16 @@
               <label class="sys-update-token-check">
                 <input type="checkbox" id="chkSaveUpdateToken" checked>
                 <span>Сохранить на сервере</span>
+              </label>
+            </div>
+            <div class="settings-row" style="margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border-subtle);">
+              <div class="settings-row-info">
+                <span class="settings-row-label">Модуль Tempo (учёт времени)</span>
+                <span class="settings-row-desc">Включает списание рабочего времени в задачах и вкладку «Tempo» с табелем (по умолчанию выключено)</span>
+              </div>
+              <label class="sys-update-token-check">
+                <input type="checkbox" id="chkTempoEnabled">
+                <span id="lblTempoEnabledState">Выключено</span>
               </label>
             </div>
             <div class="settings-row" style="margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border-subtle);">
