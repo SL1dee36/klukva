@@ -5807,6 +5807,7 @@ textarea.form-control {
   }
 
   [data-style="remaster"] #sectionSprint .table-scroll-wrapper,
+  [data-style="remaster"] #sectionNextSprint .table-scroll-wrapper,
   [data-style="remaster"] #sectionBacklog .table-scroll-wrapper {
     max-height: none;
     overflow-x: visible;
@@ -5814,6 +5815,7 @@ textarea.form-control {
 
   [data-style="remaster"] #viewBacklog .tasks-table,
   [data-style="remaster"] #sectionSprint .tasks-table,
+  [data-style="remaster"] #sectionNextSprint .tasks-table,
   [data-style="remaster"] #sectionBacklog .tasks-table {
     display: block;
     min-width: 0;
@@ -5822,12 +5824,14 @@ textarea.form-control {
 
   [data-style="remaster"] #viewBacklog .tasks-table thead,
   [data-style="remaster"] #sectionSprint .tasks-table thead,
+  [data-style="remaster"] #sectionNextSprint .tasks-table thead,
   [data-style="remaster"] #sectionBacklog .tasks-table thead {
     display: none;
   }
 
   [data-style="remaster"] #viewBacklog .tasks-table tbody,
   [data-style="remaster"] #sectionSprint .tasks-table tbody,
+  [data-style="remaster"] #sectionNextSprint .tasks-table tbody,
   [data-style="remaster"] #sectionBacklog .tasks-table tbody {
     display: flex;
     flex-direction: column;
@@ -5837,6 +5841,7 @@ textarea.form-control {
 
   [data-style="remaster"] #viewBacklog .tasks-table tbody tr,
   [data-style="remaster"] #sectionSprint .tasks-table tbody tr,
+  [data-style="remaster"] #sectionNextSprint .tasks-table tbody tr,
   [data-style="remaster"] #sectionBacklog .tasks-table tbody tr {
     display: flex;
     flex-wrap: wrap;
@@ -5851,6 +5856,7 @@ textarea.form-control {
 
   [data-style="remaster"] #viewBacklog .tasks-table tbody td,
   [data-style="remaster"] #sectionSprint .tasks-table tbody td,
+  [data-style="remaster"] #sectionNextSprint .tasks-table tbody td,
   [data-style="remaster"] #sectionBacklog .tasks-table tbody td {
     display: block;
     padding: 0;
@@ -5859,32 +5865,38 @@ textarea.form-control {
     text-align: left !important;
   }
 
-  /* Backlog table: Key(1), Title(2), SP(3), Assignee(4), Status(5), Actions(6) */
+  /* Backlog table: Checkbox(1), Key(2), Title(3), SP(4), Assignee(5), Status(6), Actions(7) */
   [data-style="remaster"] #viewBacklog .tasks-table tbody td:nth-child(1) {
+    order: 0;
+    display: inline-flex;
+    align-items: center;
+  }
+
+  [data-style="remaster"] #viewBacklog .tasks-table tbody td:nth-child(2) {
     order: 1;
   }
 
-  [data-style="remaster"] #viewBacklog .tasks-table tbody td:nth-child(5) {
+  [data-style="remaster"] #viewBacklog .tasks-table tbody td:nth-child(6) {
     order: 2;
   }
 
-  [data-style="remaster"] #viewBacklog .tasks-table tbody td:nth-child(3) {
+  [data-style="remaster"] #viewBacklog .tasks-table tbody td:nth-child(4) {
     order: 3;
     margin-left: auto;
   }
 
-  [data-style="remaster"] #viewBacklog .tasks-table tbody td:nth-child(2) {
+  [data-style="remaster"] #viewBacklog .tasks-table tbody td:nth-child(3) {
     order: 4;
     flex: 1 0 100%;
     font-size: 13.5px;
     padding: 2px 0;
   }
 
-  [data-style="remaster"] #viewBacklog .tasks-table tbody td:nth-child(4) {
+  [data-style="remaster"] #viewBacklog .tasks-table tbody td:nth-child(5) {
     order: 5;
   }
 
-  [data-style="remaster"] #viewBacklog .tasks-table tbody td:nth-child(6) {
+  [data-style="remaster"] #viewBacklog .tasks-table tbody td:nth-child(7) {
     order: 6;
     margin-left: auto;
     display: flex;
@@ -5894,27 +5906,32 @@ textarea.form-control {
 
   /* Sprint/Pool tables: Drag(1), Key(2), Title(3), SP(4), Assignee(5), Status(6), Actions(7) */
   [data-style="remaster"] #sectionSprint .tasks-table tbody td:nth-child(1),
+  [data-style="remaster"] #sectionNextSprint .tasks-table tbody td:nth-child(1),
   [data-style="remaster"] #sectionBacklog .tasks-table tbody td:nth-child(1) {
     display: none;
   }
 
   [data-style="remaster"] #sectionSprint .tasks-table tbody td:nth-child(2),
+  [data-style="remaster"] #sectionNextSprint .tasks-table tbody td:nth-child(2),
   [data-style="remaster"] #sectionBacklog .tasks-table tbody td:nth-child(2) {
     order: 1;
   }
 
   [data-style="remaster"] #sectionSprint .tasks-table tbody td:nth-child(6),
+  [data-style="remaster"] #sectionNextSprint .tasks-table tbody td:nth-child(6),
   [data-style="remaster"] #sectionBacklog .tasks-table tbody td:nth-child(6) {
     order: 2;
   }
 
   [data-style="remaster"] #sectionSprint .tasks-table tbody td:nth-child(4),
+  [data-style="remaster"] #sectionNextSprint .tasks-table tbody td:nth-child(4),
   [data-style="remaster"] #sectionBacklog .tasks-table tbody td:nth-child(4) {
     order: 3;
     margin-left: auto;
   }
 
   [data-style="remaster"] #sectionSprint .tasks-table tbody td:nth-child(3),
+  [data-style="remaster"] #sectionNextSprint .tasks-table tbody td:nth-child(3),
   [data-style="remaster"] #sectionBacklog .tasks-table tbody td:nth-child(3) {
     order: 4;
     flex: 1 0 100%;
@@ -5923,11 +5940,13 @@ textarea.form-control {
   }
 
   [data-style="remaster"] #sectionSprint .tasks-table tbody td:nth-child(5),
+  [data-style="remaster"] #sectionNextSprint .tasks-table tbody td:nth-child(5),
   [data-style="remaster"] #sectionBacklog .tasks-table tbody td:nth-child(5) {
     order: 5;
   }
 
   [data-style="remaster"] #sectionSprint .tasks-table tbody td:nth-child(7),
+  [data-style="remaster"] #sectionNextSprint .tasks-table tbody td:nth-child(7),
   [data-style="remaster"] #sectionBacklog .tasks-table tbody td:nth-child(7) {
     order: 6;
     margin-left: auto;
