@@ -7,6 +7,12 @@ import sys
 import subprocess
 import re
 import uuid
+import json
+import shutil
+import tempfile
+import zipfile
+import urllib.request
+import urllib.error
 import mimetypes
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
@@ -36,6 +42,7 @@ from backend.auth import (
 from backend.db import (
     ATTACHMENTS_DIR,
     AVATARS_DIR,
+    DB_FILE_PATH,
     VALID_CLUSTERS,
     VALID_ROLES,
     VALID_STATUSES,
@@ -1371,6 +1378,29 @@ def delete_attachment(task_id: int, att_id: int, current_user: Dict = Depends(re
 # ============================================================================
 # SYSTEM / UPDATE
 # ============================================================================
+DEFAULT_GITHUB_REPO = "SL1dee36/klukva"
+DEFAULT_GITHUB_BRANCH = "main"
+VERSION_META_FILE = ".klukva_version.json"
+UPDATE_TOKEN_FILE = ".klukva_update_token"
+PROTECTED_TOP_ENTRIES = {
+    "klukva_db.json",
+    "klukva_attachments",
+    ".git",
+    ".venv",
+    "venv",
+    ".env",
+    "__pycache__",
+    "logs",
+    VERSION_META_FILE,
+    UPDATE_TOKEN_FILE,
+}
+
+
+class SystemUpdateRequest(BaseModel):
+    github_token: Optional[str] = None
+    save_token: Optional[bool] = False
+
+
 def find_repo_dir() -> str:
     env_dir = os.environ.get("KLUKVA_REPO_DIR")
     if env_dir and os.path.exists(env_dir):
@@ -1395,21 +1425,315 @@ def find_repo_dir() -> str:
     return this_dir
 
 
-def pull_repo_changes(repo_dir: str) -> Dict[str, Any]:
-    try:
-        check_git = subprocess.run(["git", "--version"], capture_output=True, text=True, timeout=5)
-        if check_git.returncode != 0:
-            return {"ok": False, "error": "Git не найден в системе."}
-    except Exception:
-        return {"ok": False, "error": "Git не найден в системе. Убедитесь, что Git установлен."}
+def _get_github_repo_and_branch() -> tuple[str, str]:
+    repo = (os.environ.get("KLUKVA_GITHUB_REPO") or DEFAULT_GITHUB_REPO).strip()
+    branch = (os.environ.get("KLUKVA_GITHUB_BRANCH") or DEFAULT_GITHUB_BRANCH).strip()
+    return repo, branch
 
+
+def _get_github_token(repo_dir: str, explicit_token: Optional[str] = None) -> str:
+    if explicit_token and explicit_token.strip():
+        return explicit_token.strip()
+    env_tok = (os.environ.get("KLUKVA_GITHUB_TOKEN") or os.environ.get("GITHUB_TOKEN") or "").strip()
+    if env_tok:
+        return env_tok
+    tok_path = os.path.join(repo_dir, UPDATE_TOKEN_FILE)
+    if os.path.exists(tok_path):
+        try:
+            with open(tok_path, "r", encoding="utf-8") as f:
+                saved = f.read().strip()
+                if saved:
+                    return saved
+        except Exception:
+            pass
+    git_cfg = os.path.join(repo_dir, ".git", "config")
+    if os.path.exists(git_cfg):
+        try:
+            with open(git_cfg, "r", encoding="utf-8", errors="ignore") as f:
+                m = re.search(r"https://([^@\s/]+)@github\.com/", f.read())
+                if m:
+                    raw = m.group(1)
+                    return raw.split(":")[-1] if ":" in raw else raw
+        except Exception:
+            pass
+    return ""
+
+
+def _save_github_token(repo_dir: str, token: str) -> None:
+    tok_path = os.path.join(repo_dir, UPDATE_TOKEN_FILE)
+    with open(tok_path, "w", encoding="utf-8") as f:
+        f.write(token.strip())
+    try:
+        os.chmod(tok_path, 0o600)
+    except Exception:
+        pass
+
+
+def _read_version_meta(repo_dir: str) -> Optional[Dict[str, Any]]:
+    meta_path = os.path.join(repo_dir, VERSION_META_FILE)
+    if not os.path.exists(meta_path):
+        return None
+    try:
+        with open(meta_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            if isinstance(data, dict) and data.get("sha"):
+                return data
+    except Exception:
+        pass
+    return None
+
+
+def _write_version_meta(repo_dir: str, info: Dict[str, Any]) -> None:
+    meta_path = os.path.join(repo_dir, VERSION_META_FILE)
+    payload = {
+        "sha": info.get("sha"),
+        "short_sha": info.get("short_sha") or (info.get("sha") or "")[:7],
+        "date": info.get("date"),
+        "message": info.get("message"),
+        "repo": info.get("repo"),
+        "branch": info.get("branch"),
+        "updated_at": datetime.utcnow().isoformat() + "Z",
+    }
+    try:
+        with open(meta_path, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+
+def _get_local_version_info(repo_dir: str) -> Dict[str, Any]:
     git_dir = os.path.join(repo_dir, ".git")
-    if not os.path.exists(git_dir):
-        return {"ok": False, "error": f"Каталог {repo_dir} не является Git-репозиторием."}
+    if os.path.exists(git_dir):
+        try:
+            res = subprocess.run(
+                ["git", "log", "-1", "--format=%H%n%h%n%cI%n%s"],
+                cwd=repo_dir,
+                capture_output=True,
+                text=True,
+                timeout=8,
+                encoding="utf-8",
+                errors="replace",
+            )
+            if res.returncode == 0:
+                lines = (res.stdout or "").splitlines()
+                if len(lines) >= 2:
+                    return {
+                        "sha": lines[0].strip(),
+                        "short_sha": lines[1].strip(),
+                        "date": lines[2].strip() if len(lines) > 2 else None,
+                        "message": lines[3].strip() if len(lines) > 3 else "",
+                        "source": "git",
+                    }
+        except Exception:
+            pass
+
+    meta = _read_version_meta(repo_dir)
+    if meta:
+        return {
+            "sha": meta.get("sha"),
+            "short_sha": meta.get("short_sha") or (meta.get("sha") or "")[:7],
+            "date": meta.get("date"),
+            "message": meta.get("message") or "",
+            "updated_at": meta.get("updated_at"),
+            "source": "meta",
+        }
+
+    return {
+        "sha": None,
+        "short_sha": None,
+        "date": None,
+        "message": "",
+        "source": "unknown",
+    }
+
+
+def _fetch_remote_github_version(repo: str, branch: str, token: str = "") -> Dict[str, Any]:
+    url = f"https://api.github.com/repos/{repo}/commits/{branch}"
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "User-Agent": "Klukva-Updater/1.0",
+    }
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+
+    req = urllib.request.Request(url, headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            raw = resp.read().decode("utf-8", errors="replace")
+            data = json.loads(raw)
+            sha = data.get("sha") or ""
+            commit = data.get("commit") or {}
+            committer = commit.get("committer") or commit.get("author") or {}
+            msg_first_line = (commit.get("message") or "").splitlines()[0] if commit.get("message") else ""
+            return {
+                "ok": True,
+                "sha": sha,
+                "short_sha": sha[:7] if sha else "",
+                "date": committer.get("date"),
+                "message": msg_first_line,
+                "url": data.get("html_url"),
+                "repo": repo,
+                "branch": branch,
+            }
+    except urllib.error.HTTPError as e:
+        if e.code in (401, 403, 404):
+            return {
+                "ok": False,
+                "auth_required": True,
+                "error": f"GitHub API вернул {e.code}. Если репозиторий приватный, укажите GitHub PAT в настройках обновления.",
+            }
+        return {"ok": False, "error": f"Ошибка GitHub API: HTTP {e.code}"}
+    except Exception as e:
+        return {"ok": False, "error": f"Не удалось подключиться к GitHub: {e}"}
+
+
+def _is_protected_rel_path(rel_path: str, repo_dir: str) -> bool:
+    norm = rel_path.replace("\\", "/").lstrip("/")
+    if not norm:
+        return True
+    parts = norm.split("/")
+    top = parts[0]
+    if top in PROTECTED_TOP_ENTRIES:
+        return True
+    if top.startswith("klukva_db.json") or top.endswith(".db") or top.startswith(".env"):
+        return True
+    if "__pycache__" in parts:
+        return True
+    abs_target = os.path.abspath(os.path.join(repo_dir, norm))
+    db_abs = os.path.abspath(DB_FILE_PATH)
+    att_abs = os.path.abspath(ATTACHMENTS_DIR)
+    if abs_target == db_abs or abs_target.startswith(att_abs + os.sep) or abs_target == att_abs:
+        return True
+    return False
+
+
+def _update_from_github_archive(
+    repo_dir: str,
+    repo: str,
+    branch: str,
+    token: str = "",
+    latest_info: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    if not latest_info or not latest_info.get("ok"):
+        latest_info = _fetch_remote_github_version(repo, branch, token=token)
+        if not latest_info.get("ok"):
+            return latest_info
+
+    local_before = _get_local_version_info(repo_dir)
+    zip_url = f"https://api.github.com/repos/{repo}/zipball/{branch}"
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "User-Agent": "Klukva-Updater/1.0",
+    }
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+
+    try:
+        with tempfile.TemporaryDirectory(prefix="klukva_upd_") as tmpdir:
+            zip_path = os.path.join(tmpdir, "repo.zip")
+            req = urllib.request.Request(zip_url, headers=headers)
+            with urllib.request.urlopen(req, timeout=60) as resp, open(zip_path, "wb") as out_f:
+                shutil.copyfileobj(resp, out_f)
+
+            extract_dir = os.path.join(tmpdir, "extracted")
+            with zipfile.ZipFile(zip_path, "r") as zf:
+                zf.extractall(extract_dir)
+
+            entries = [os.path.join(extract_dir, name) for name in os.listdir(extract_dir)]
+            dirs = [p for p in entries if os.path.isdir(p)]
+            src_root = dirs[0] if len(dirs) == 1 else extract_dir
+
+            updated_files: List[str] = []
+            py_changed = False
+
+            for root, dirnames, filenames in os.walk(src_root):
+                rel_dir = os.path.relpath(root, src_root)
+                if rel_dir == ".":
+                    rel_dir = ""
+
+                # Prune protected directories
+                dirnames[:] = [
+                    d for d in dirnames
+                    if not _is_protected_rel_path(os.path.join(rel_dir, d) if rel_dir else d, repo_dir)
+                ]
+
+                for fname in filenames:
+                    rel_file = os.path.join(rel_dir, fname) if rel_dir else fname
+                    if _is_protected_rel_path(rel_file, repo_dir):
+                        continue
+
+                    src_file = os.path.join(root, fname)
+                    dst_file = os.path.join(repo_dir, rel_file)
+
+                    with open(src_file, "rb") as sf:
+                        new_bytes = sf.read()
+
+                    old_bytes = None
+                    if os.path.exists(dst_file):
+                        try:
+                            with open(dst_file, "rb") as df:
+                                old_bytes = df.read()
+                        except Exception:
+                            old_bytes = None
+
+                    if old_bytes != new_bytes:
+                        os.makedirs(os.path.dirname(dst_file), exist_ok=True)
+                        with open(dst_file, "wb") as df:
+                            df.write(new_bytes)
+                        updated_files.append(rel_file.replace("\\", "/"))
+                        if rel_file.endswith(".py"):
+                            py_changed = True
+
+        _write_version_meta(repo_dir, latest_info)
+        local_after = _get_local_version_info(repo_dir)
+        is_updated = bool(updated_files) or (local_before.get("sha") != latest_info.get("sha"))
+
+        return {
+            "ok": True,
+            "mode": "github_archive",
+            "updated": is_updated,
+            "updated_files_count": len(updated_files),
+            "py_changed": py_changed,
+            "current": local_after,
+            "latest": latest_info,
+            "message": (
+                f"Обновлено файлов: {len(updated_files)} (версия {latest_info.get('short_sha')}). БД и вложения сохранены."
+                if is_updated
+                else "Установлена актуальная версия."
+            ),
+        }
+    except urllib.error.HTTPError as e:
+        if e.code in (401, 403, 404):
+            return {
+                "ok": False,
+                "auth_required": True,
+                "error": f"Не удалось скачать архив с GitHub (HTTP {e.code}). Проверьте GitHub PAT.",
+            }
+        return {"ok": False, "error": f"Ошибка скачивания архива с GitHub: HTTP {e.code}"}
+    except Exception as e:
+        return {"ok": False, "error": f"Ошибка обновления из GitHub: {e}"}
+
+
+def pull_repo_changes(repo_dir: str, token: str = "") -> Dict[str, Any]:
+    repo, branch = _get_github_repo_and_branch()
+    eff_token = _get_github_token(repo_dir, explicit_token=token)
+    git_dir = os.path.join(repo_dir, ".git")
+
+    has_git = False
+    if os.path.exists(git_dir):
+        try:
+            check_git = subprocess.run(["git", "--version"], capture_output=True, text=True, timeout=5)
+            has_git = (check_git.returncode == 0)
+        except Exception:
+            has_git = False
+
+    if not has_git:
+        # Server deployment without .git (e.g. /opt/klukva): update directly via GitHub archive
+        return _update_from_github_archive(repo_dir, repo, branch, token=eff_token)
 
     try:
         res = subprocess.run(
-            ["git", "pull", "--autostash", "origin", "main"],
+            ["git", "pull", "--autostash", "origin", branch],
             cwd=repo_dir,
             capture_output=True,
             text=True,
@@ -1441,11 +1765,17 @@ def pull_repo_changes(repo_dir: str) -> Dict[str, Any]:
 
         is_updated = "Already up to date" not in stdout and "Уже обновлено" not in stdout and "Already up-to-date" not in stdout
         py_changed = any(".py" in line for line in stdout.splitlines())
+        local_after = _get_local_version_info(repo_dir)
+        if local_after.get("sha"):
+            _write_version_meta(repo_dir, {**local_after, "repo": repo, "branch": branch})
 
         return {
             "ok": True,
+            "mode": "git",
             "updated": is_updated,
             "py_changed": py_changed,
+            "current": local_after,
+            "latest": local_after,
             "message": stdout or "Успешно обновлено",
             "output": stdout
         }
@@ -1456,15 +1786,70 @@ def pull_repo_changes(repo_dir: str) -> Dict[str, Any]:
         }
 
 
-@router.post("/system/update")
-def trigger_update(current_user: Dict = Depends(require_role("admin"))):
-    """Pulls latest changes from Git repository."""
+@router.get("/system/update/check")
+def check_update_status(
+    github_token: Optional[str] = Query(None),
+    current_user: Dict = Depends(require_role("admin")),
+):
+    """Checks current local version vs latest commit on GitHub."""
     repo_dir = find_repo_dir()
-    res = pull_repo_changes(repo_dir)
+    repo, branch = _get_github_repo_and_branch()
+    eff_token = _get_github_token(repo_dir, explicit_token=github_token)
+    mode = "git" if os.path.exists(os.path.join(repo_dir, ".git")) else "github_archive"
+
+    local_info = _get_local_version_info(repo_dir)
+    remote_info = _fetch_remote_github_version(repo, branch, token=eff_token)
+
+    if not remote_info.get("ok"):
+        return {
+            "ok": False,
+            "repo": repo,
+            "branch": branch,
+            "mode": mode,
+            "current": local_info,
+            "latest": None,
+            "update_available": False,
+            "has_token": bool(eff_token),
+            "auth_required": bool(remote_info.get("auth_required")),
+            "error": remote_info.get("error", "Ошибка проверки версии на GitHub"),
+        }
+
+    local_sha = local_info.get("sha")
+    remote_sha = remote_info.get("sha")
+    update_available = (not local_sha) or (bool(remote_sha) and local_sha != remote_sha)
+
+    return {
+        "ok": True,
+        "repo": repo,
+        "branch": branch,
+        "mode": mode,
+        "current": local_info,
+        "latest": remote_info,
+        "update_available": update_available,
+        "has_token": bool(eff_token),
+    }
+
+
+@router.post("/system/update")
+def trigger_update(
+    req: Optional[SystemUpdateRequest] = None,
+    current_user: Dict = Depends(require_role("admin")),
+):
+    """Updates app from Git or GitHub archive while preserving DB and user data."""
+    repo_dir = find_repo_dir()
+    token = (req.github_token or "").strip() if req and req.github_token else ""
+    if req and req.save_token and token:
+        _save_github_token(repo_dir, token)
+
+    res = pull_repo_changes(repo_dir, token=token)
     db.add_activity(
         current_user["username"],
         "system_update",
-        details="Выполнено обновление из Git" if res.get("ok") else f"Ошибка обновления: {res.get('error', '')}",
+        details=(
+            f"Выполнено обновление ({res.get('mode', 'git')})"
+            if res.get("ok")
+            else f"Ошибка обновления: {res.get('error', '')}"
+        ),
     )
     return res
 

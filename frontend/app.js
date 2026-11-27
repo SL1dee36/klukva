@@ -590,12 +590,90 @@ async function handleCloseSprint() {
   }
 }
 
-// ---------------- ОБНОВЛЕНИЕ ИЗ РЕПОЗИТОРИЯ ----------------
+// ---------------- ОБНОВЛЕНИЕ С GITHUB ----------------
+function renderUpdateVersionInfo(res) {
+  const curEl = document.getElementById("sysCurrentVersion");
+  const latEl = document.getElementById("sysLatestVersion");
+  const badgeEl = document.getElementById("sysUpdateStatusBadge");
+  const btnUpdate = document.getElementById("btnAppUpdate");
+  const tokenRow = document.getElementById("sysUpdateTokenRow");
+
+  const fmtVer = (v) => {
+    if (!v || !v.short_sha) return "неизвестна";
+    const datePart = v.date ? ` (${formatDate(v.date)})` : "";
+    const msgPart = v.message ? ` — ${v.message.slice(0, 48)}` : "";
+    return `${v.short_sha}${datePart}${msgPart}`;
+  };
+
+  if (curEl) curEl.textContent = fmtVer(res.current);
+  if (latEl) latEl.textContent = res.latest ? fmtVer(res.latest) : "ошибка проверки";
+
+  if (tokenRow && res.auth_required) {
+    tokenRow.style.display = "flex";
+  }
+
+  if (badgeEl) {
+    badgeEl.classList.remove("is-available", "is-latest", "is-error");
+    if (!res.ok) {
+      badgeEl.textContent = "Ошибка проверки";
+      badgeEl.classList.add("is-error");
+    } else if (res.update_available) {
+      badgeEl.textContent = "Доступно обновление";
+      badgeEl.classList.add("is-available");
+    } else {
+      badgeEl.textContent = "Актуальная версия";
+      badgeEl.classList.add("is-latest");
+    }
+  }
+
+  if (btnUpdate) {
+    btnUpdate.classList.toggle("btn-primary", Boolean(res.ok && res.update_available));
+    btnUpdate.classList.toggle("btn-secondary", !Boolean(res.ok && res.update_available));
+  }
+}
+
+async function checkAppUpdate(silent = false) {
+  const btnCheck = document.getElementById("btnCheckAppUpdate");
+  const tokenInput = document.getElementById("inputUpdateGithubToken");
+  const token = tokenInput ? tokenInput.value.trim() : "";
+
+  if (btnCheck) {
+    btnCheck.disabled = true;
+    btnCheck.textContent = "Проверка...";
+  }
+
+  try {
+    const qs = token ? `?github_token=${encodeURIComponent(token)}` : "";
+    const res = await api(`/api/system/update/check${qs}`);
+    renderUpdateVersionInfo(res);
+    if (!silent) {
+      if (!res.ok) {
+        showToast(res.error || "Не удалось проверить версию на GitHub");
+      } else if (res.update_available) {
+        showToast(`Доступно обновление: ${res.latest?.short_sha || "новая версия"}`);
+      } else {
+        showToast("Установлена актуальная версия.");
+      }
+    }
+  } catch (err) {
+    if (!silent) showToast(`Ошибка проверки версии: ${err.message}`);
+  } finally {
+    if (btnCheck) {
+      btnCheck.disabled = false;
+      btnCheck.textContent = "Проверить версию";
+    }
+  }
+}
+
 async function handleAppUpdate() {
   const btn = document.getElementById("btnAppUpdate");
   const btnSys = document.getElementById("btnSysAppUpdate");
   const icon = document.getElementById("btnUpdateIcon");
   const text = document.getElementById("btnUpdateText");
+  const tokenInput = document.getElementById("inputUpdateGithubToken");
+  const saveChk = document.getElementById("chkSaveUpdateToken");
+  const token = tokenInput ? tokenInput.value.trim() : "";
+  const saveToken = Boolean(saveChk && saveChk.checked);
 
   if (btn) btn.disabled = true;
   if (btnSys) {
@@ -606,17 +684,29 @@ async function handleAppUpdate() {
   if (text) text.textContent = "Обновление...";
 
   try {
-    const res = await api("/api/system/update", { method: "POST" });
+    const res = await api("/api/system/update", {
+      method: "POST",
+      body: JSON.stringify({ github_token: token || null, save_token: saveToken })
+    });
     if (!res.ok) {
+      if (res.auth_required) {
+        const tokenRow = document.getElementById("sysUpdateTokenRow");
+        if (tokenRow) tokenRow.style.display = "flex";
+      }
       showToast(`Ошибка обновления: ${res.error || "Неизвестная ошибка"}`);
     } else if (res.updated) {
-      showToast("Программа успешно обновлена из репозитория! Перезагрузка страницы...");
+      renderUpdateVersionInfo({ ...res, update_available: false });
+      const pyNote = res.py_changed
+        ? " Обновлён backend (.py) — при необходимости перезапустите сервис на сервере."
+        : "";
+      showToast(`Обновление завершено (${res.current?.short_sha || "ok"}). БД и данные сохранены.${pyNote} Перезагрузка...`);
       setTimeout(() => {
         window.location.reload();
-      }, 1200);
+      }, 1600);
       return;
     } else {
-      showToast("Установлена актуальная версия. Изменений в репозитории нет.");
+      renderUpdateVersionInfo({ ...res, update_available: false });
+      showToast("Установлена актуальная версия. Изменений на GitHub нет.");
     }
   } catch (err) {
     showToast(`Ошибка запроса обновления: ${err.message}`);
@@ -2902,7 +2992,11 @@ function setupEventListeners() {
     loadTasks();
   });
 
-  // Кнопка обновления из репозитория
+  // Кнопка обновления с GitHub и проверки версии
+  const btnCheckAppUpdate = document.getElementById("btnCheckAppUpdate");
+  if (btnCheckAppUpdate) {
+    btnCheckAppUpdate.addEventListener("click", () => checkAppUpdate(false));
+  }
   const btnAppUpdate = document.getElementById("btnAppUpdate");
   if (btnAppUpdate) {
     btnAppUpdate.addEventListener("click", handleAppUpdate);
@@ -3223,6 +3317,9 @@ async function openProfileView(username = null) {
   state.viewingProfileUsername = targetUsername;
   const isOwn = targetUsername.toLowerCase() === state.currentUser.username.toLowerCase();
   const mustForce = isOwn && !!state.currentUser.must_change_credentials;
+  if (isOwn && hasMinRole("admin") && !mustForce) {
+    checkAppUpdate(true);
+  }
 
   const fullpageEl = document.getElementById("fullpageProfile");
   const backBtn = document.getElementById("btnBackFromProfile");

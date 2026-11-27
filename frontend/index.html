@@ -1149,17 +1149,34 @@
               <h3 class="profile-card-title" style="margin-bottom: 4px;">Системные настройки</h3>
               <p class="profile-hint" style="margin: 0;">Управление программой и обновлениями для администраторов</p>
             </div>
+            <span class="sys-update-badge" id="sysUpdateStatusBadge">Не проверено</span>
           </div>
           <div class="settings-groups-list">
             <div class="settings-row">
               <div class="settings-row-info">
-                <span class="settings-row-label">Обновление из репозитория</span>
-                <span class="settings-row-desc">Загрузить последние изменения программы из GitHub и перезагрузить интерфейс</span>
+                <span class="settings-row-label">Обновление с GitHub</span>
+                <span class="settings-row-desc">Проверяет версию на GitHub и обновляет код сайта, сохраняя базу данных и пользовательские файлы</span>
+                <div class="sys-update-versions" id="sysUpdateVersionBox">
+                  <span>Текущая: <b id="sysCurrentVersion">—</b></span>
+                  <span>На GitHub: <b id="sysLatestVersion">—</b></span>
+                </div>
               </div>
-              <button type="button" class="btn btn-secondary btn-sm" id="btnAppUpdate" title="Обновить программу из репозитория GitHub">
-                <span id="btnUpdateIcon">🔄</span>
-                <span id="btnUpdateText">Обновить</span>
-              </button>
+              <div class="sys-update-actions">
+                <button type="button" class="btn btn-secondary btn-sm" id="btnCheckAppUpdate" title="Проверить наличие новой версии на GitHub">
+                  Проверить версию
+                </button>
+                <button type="button" class="btn btn-secondary btn-sm" id="btnAppUpdate" title="Обновить программу с GitHub (без потери БД и вложений)">
+                  <span id="btnUpdateIcon">🔄</span>
+                  <span id="btnUpdateText">Обновить</span>
+                </button>
+              </div>
+            </div>
+            <div class="sys-update-token-row" id="sysUpdateTokenRow" style="display: none;">
+              <input type="password" id="inputUpdateGithubToken" class="form-control input-sm" placeholder="GitHub PAT (если репозиторий приватный)" autocomplete="off">
+              <label class="sys-update-token-check">
+                <input type="checkbox" id="chkSaveUpdateToken" checked>
+                <span>Сохранить на сервере</span>
+              </label>
             </div>
           </div>
         </div>
